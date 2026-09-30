@@ -113,3 +113,44 @@ cd backend
 .\venv\Scripts\Activate.ps1
 pytest tests/ -v
 ```
+
+## Deploying so a client can access it via a link (no install needed)
+
+The backend can serve the built frontend directly, so the whole system runs
+as **one URL** (see the static-file mount in `backend/app/main.py`, active
+whenever `frontend/dist` exists). That makes it deployable as a single web
+service.
+
+### 1. Push to GitHub
+
+```powershell
+git remote add origin <your-empty-github-repo-url>
+git branch -M main
+git push -u origin main
+```
+
+(Create the empty repo first at github.com/new — don't initialize it with a
+README/.gitignore, since this project already has its own.)
+
+### 2. Deploy on Render.com (free tier)
+
+1. Sign in to [render.com](https://render.com) with your GitHub account.
+2. **New** → **Blueprint** → pick this repo. Render will read `render.yaml`
+   at the repo root and configure the build/start commands automatically.
+   (Or **New** → **Web Service** and set them manually: build command
+   `cd backend && pip install -r requirements.txt && cd ../frontend && npm
+   install && npm run build`, start command `cd backend && uvicorn
+   app.main:app --host 0.0.0.0 --port $PORT`.)
+3. Deploy. Render gives you a public URL — that's the link to send the
+   client.
+
+**Important caveat**: Render's **free** web service plan has an ephemeral
+filesystem — the SQLite database (`backend/data/road_inventory.db`) gets
+wiped on every redeploy, and the instance also spins down after 15 minutes
+of inactivity (the first request after that takes ~30–60s to wake back up).
+That's fine for the client to *try out* the upload/diagram workflow, but
+uploaded data won't reliably persist long-term on the free tier. If the
+client wants to actually start using it for real, upgrade to a paid instance
+(~$7/mo) and attach a persistent disk (~$0.25/GB/mo) mounted at
+`backend/data`, so uploads survive redeploys — ask me and I'll wire that up
+when you're ready for that step.
