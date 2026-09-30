@@ -12,7 +12,7 @@ const REQUIRED_COLUMNS = [
   'Shoulder Surface type Right',
 ]
 
-export default function UploadPanel({ onUploaded }) {
+export default function UploadPanel({ onUploaded, onExpand }) {
   const fileInputRef = useRef(null)
   const [fileName, setFileName] = useState('')
   const [uploading, setUploading] = useState(false)
@@ -39,6 +39,12 @@ export default function UploadPanel({ onUploaded }) {
 
   return (
     <div className="panel">
+      <button type="button" className="panel-icon" title="Upload Excel File" onClick={onExpand}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 4v10m0-10 4 4m-4-4-4 4M5 18h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      <div className="panel-body">
       <h2>1. Upload Excel File</h2>
       <button className="btn-primary btn-block" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
         {uploading ? (
@@ -125,6 +131,7 @@ export default function UploadPanel({ onUploaded }) {
             <li key={c}>{c}</li>
           ))}
         </ul>
+      </div>
       </div>
     </div>
   )

@@ -19,6 +19,7 @@ export default function App() {
   const [settings, setSettings] = useState({ stationIntervalM: 1000, stationsPerLine: 10 })
   const [diagramVersion, setDiagramVersion] = useState(0)
   const [hasGenerated, setHasGenerated] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   async function refreshRoads() {
     const list = await fetchRoadsList()
@@ -69,19 +70,41 @@ export default function App() {
     <div className="app-shell">
       <Header />
       <div className="main-layout">
-        <aside className="sidebar">
-          <UploadPanel onUploaded={handleUploaded} />
+        <aside className={`sidebar${sidebarCollapsed ? ' collapsed' : ''}`}>
+          <button
+            className="sidebar-toggle no-print"
+            onClick={() => setSidebarCollapsed((c) => !c)}
+            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              {sidebarCollapsed ? (
+                <path d="M9 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              ) : (
+                <path d="M15 6l-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              )}
+            </svg>
+          </button>
+          <UploadPanel
+            onUploaded={handleUploaded}
+            collapsed={sidebarCollapsed}
+            onExpand={() => setSidebarCollapsed(false)}
+          />
           <RoadSelectPanel
             roads={roads}
             selectedRoadId={selectedRoadId}
             onSelect={handleSelectRoad}
             roadName={selectedRoadName}
+            collapsed={sidebarCollapsed}
+            onExpand={() => setSidebarCollapsed(false)}
           />
           <DiagramSettingsPanel
             settings={settings}
             onChange={setSettings}
             onGenerate={handleGenerate}
             canGenerate={!!roadDetail}
+            onExpand={() => setSidebarCollapsed(false)}
+            collapsed={sidebarCollapsed}
           />
         </aside>
         <main className="content">

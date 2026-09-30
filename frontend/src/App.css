@@ -37,6 +37,55 @@
   gap: 16px;
   position: sticky;
   top: 20px;
+  transition: width 0.2s ease;
+}
+.sidebar.collapsed {
+  width: 60px;
+}
+
+.sidebar-toggle {
+  position: absolute;
+  top: 14px;
+  right: -14px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  z-index: 5;
+}
+
+.panel-icon {
+  display: none;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.sidebar.collapsed .panel {
+  padding: 6px;
+  display: flex;
+  justify-content: center;
+}
+.sidebar.collapsed .panel-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+.sidebar.collapsed .panel-icon:hover {
+  background: var(--surface-sunken);
+  color: var(--accent);
+}
+.sidebar.collapsed .panel-body {
+  display: none;
 }
 
 .content {

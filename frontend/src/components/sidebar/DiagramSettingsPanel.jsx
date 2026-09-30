@@ -6,9 +6,18 @@ const INTERVAL_OPTIONS = [
 
 const STATIONS_PER_LINE_OPTIONS = [5, 10, 15, 20]
 
-export default function DiagramSettingsPanel({ settings, onChange, onGenerate, canGenerate }) {
+export default function DiagramSettingsPanel({ settings, onChange, onGenerate, canGenerate, onExpand }) {
   return (
     <div className="panel">
+      <button type="button" className="panel-icon" title="Diagram Settings" onClick={onExpand}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h13M21 18h-1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <circle cx="16" cy="6" r="2" fill="currentColor" />
+          <circle cx="9" cy="12" r="2" fill="currentColor" />
+          <circle cx="19" cy="18" r="2" fill="currentColor" />
+        </svg>
+      </button>
+      <div className="panel-body">
       <h2>3. Diagram Settings</h2>
       <div className="settings-row">
         <label>
@@ -41,6 +50,7 @@ export default function DiagramSettingsPanel({ settings, onChange, onGenerate, c
       <button className="primary-button" onClick={onGenerate} disabled={!canGenerate}>
         Generate Road Surface Diagram
       </button>
+      </div>
     </div>
   )
 }
