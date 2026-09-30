@@ -5,6 +5,7 @@ const LEFT_MARGIN = 90
 const RIGHT_MARGIN = 20
 const TOP_MARGIN = 10
 const HEADER_H = 24
+const STATUS_STRIP_H = 6
 const SHOULDER_H = 22
 const LANE_H = 22
 const STRIP_GAP = 44
@@ -12,6 +13,8 @@ const BORDER_COLOR = '#333333'
 const MARKING_COLOR = 'rgba(255,255,255,0.75)'
 const ARROW_SPACING_PX = 70
 const MARKED_SURFACES = new Set(['asphalt', 'paved']) // surfaces with painted lane markings
+const STATUS_DONE_COLOR = '#0ca30c'
+const STATUS_NOT_DONE_COLOR = '#d03b3b'
 
 function formatStationLabel(meters) {
   const km = Math.floor(meters / 1000)
@@ -24,6 +27,60 @@ function formatStationLabel(meters) {
 // render crisp instead of anti-aliased/blurry.
 function px(v) {
   return Math.round(v)
+}
+
+// Shared layout math used by both the combined multi-strip canvas (on-screen
+// view) and the one-canvas-per-strip print path.
+function computeStripPlan(road, settings) {
+  const { stationIntervalM, stationsPerLine } = settings
+  const stripSpanM = stationIntervalM * stationsPerLine
+  const totalLengthM = road.total_length_m
+  const numStrips = totalLengthM > 0 ? Math.ceil(totalLengthM / stripSpanM) : 0
+  const globalMaxLanes = road.segments.length
+    ? Math.max(...road.segments.map((s) => s.num_lanes))
+    : 0
+  const laneBandH = globalMaxLanes * LANE_H
+  const stripHeight = HEADER_H + STATUS_STRIP_H + SHOULDER_H + laneBandH + SHOULDER_H
+  const canvasWidth = LEFT_MARGIN + STRIP_WIDTH_PX + RIGHT_MARGIN
+  return { stripSpanM, totalLengthM, numStrips, globalMaxLanes, laneBandH, stripHeight, canvasWidth }
+}
+
+export function getNumStrips(road, settings) {
+  return computeStripPlan(road, settings).numStrips
+}
+
+// Renders exactly one strip (one page's worth) onto `canvas`, sized to fit
+// just that strip -- used for print, where each strip becomes its own page
+// instead of one tall image the browser would otherwise paginate awkwardly
+// (leaving a near-blank leading page before the image "fits").
+export function renderSingleStrip(canvas, road, settings, stripIndex) {
+  const ctx = canvas.getContext('2d')
+  const plan = computeStripPlan(road, settings)
+  const pxPerMeter = STRIP_WIDTH_PX / plan.stripSpanM
+
+  canvas.width = plan.canvasWidth
+  canvas.height = TOP_MARGIN + plan.stripHeight + 10
+
+  ctx.fillStyle = '#FFFFFF'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.textBaseline = 'middle'
+  ctx.font = '11px sans-serif'
+
+  const stripStartM = stripIndex * plan.stripSpanM
+  const stripEndM = Math.min((stripIndex + 1) * plan.stripSpanM, plan.totalLengthM)
+
+  drawStrip(ctx, {
+    x0: LEFT_MARGIN,
+    y0: TOP_MARGIN,
+    stripStartM,
+    stripEndM,
+    pxPerMeter,
+    stationIntervalM: settings.stationIntervalM,
+    segments: road.segments,
+    globalMaxLanes: plan.globalMaxLanes,
+    laneBandH: plan.laneBandH,
+    hitRegions: [],
+  })
 }
 
 /**
@@ -43,13 +100,13 @@ export function renderDiagram(canvas, road, settings) {
   if (totalLengthM <= 0 || segments.length === 0) {
     canvas.width = 0
     canvas.height = 0
-    return
+    return { hitRegions: [] }
   }
 
   const numStrips = Math.ceil(totalLengthM / stripSpanM)
   const globalMaxLanes = Math.max(...segments.map((s) => s.num_lanes))
   const laneBandH = globalMaxLanes * LANE_H
-  const stripHeight = HEADER_H + SHOULDER_H + laneBandH + SHOULDER_H
+  const stripHeight = HEADER_H + STATUS_STRIP_H + SHOULDER_H + laneBandH + SHOULDER_H
 
   canvas.width = LEFT_MARGIN + STRIP_WIDTH_PX + RIGHT_MARGIN
   canvas.height = TOP_MARGIN + numStrips * stripHeight + (numStrips - 1) * STRIP_GAP + 10
@@ -58,6 +115,8 @@ export function renderDiagram(canvas, road, settings) {
   ctx.fillRect(0, 0, canvas.width, canvas.height)
   ctx.textBaseline = 'middle'
   ctx.font = '11px sans-serif'
+
+  const hitRegions = []
 
   for (let s = 0; s < numStrips; s++) {
     // Anchor each strip's meter-grid to whole-pixel boundaries at the strip
@@ -77,8 +136,11 @@ export function renderDiagram(canvas, road, settings) {
       segments,
       globalMaxLanes,
       laneBandH,
+      hitRegions,
     })
   }
+
+  return { hitRegions }
 }
 
 function drawStrip(ctx, cfg) {
@@ -92,14 +154,17 @@ function drawStrip(ctx, cfg) {
     segments,
     globalMaxLanes,
     laneBandH,
+    hitRegions,
   } = cfg
 
-  const laneBandTop = y0 + HEADER_H + SHOULDER_H
+  const statusStripY = y0 + HEADER_H
+  const topShoulderY = statusStripY + STATUS_STRIP_H
+  const laneBandTop = topShoulderY + SHOULDER_H
 
   // Row labels (left margin)
   ctx.fillStyle = '#000000'
   ctx.textAlign = 'right'
-  ctx.fillText('Shoulder', x0 - 6, y0 + HEADER_H + SHOULDER_H / 2)
+  ctx.fillText('Shoulder', x0 - 6, topShoulderY + SHOULDER_H / 2)
   for (let li = 0; li < globalMaxLanes; li++) {
     ctx.fillText(`Lane ${li + 1}`, x0 - 6, laneBandTop + li * LANE_H + LANE_H / 2)
   }
@@ -132,8 +197,13 @@ function drawStrip(ctx, cfg) {
     const xEnd = px(x0 + (clippedEnd - stripStartM) * pxPerMeter)
     const w = xEnd - x
 
+    // Done/not-done status strip -- independent of the surface-type legend
+    // colors, so progress reads at a glance without reinterpreting materials.
+    const isDone = seg.surface_type === 'asphalt'
+    ctx.fillStyle = isDone ? STATUS_DONE_COLOR : STATUS_NOT_DONE_COLOR
+    ctx.fillRect(x, statusStripY, w, STATUS_STRIP_H)
+
     // Top shoulder
-    const topShoulderY = y0 + HEADER_H
     paintCell(ctx, x, topShoulderY, w, SHOULDER_H, seg.shoulder_right)
     if (MARKED_SURFACES.has(seg.shoulder_right)) {
       drawRumbleStrip(ctx, x, w, topShoulderY + SHOULDER_H, 'down')
@@ -160,7 +230,16 @@ function drawStrip(ctx, cfg) {
     // Outer border around the full column (shoulder-to-shoulder)
     ctx.strokeStyle = BORDER_COLOR
     ctx.lineWidth = 1
-    ctx.strokeRect(x, y0 + HEADER_H, w, SHOULDER_H + laneBandH + SHOULDER_H)
+    ctx.strokeRect(x, topShoulderY, w, SHOULDER_H + laneBandH + SHOULDER_H)
+
+    hitRegions.push({
+      x,
+      y: statusStripY,
+      w,
+      h: STATUS_STRIP_H + SHOULDER_H + laneBandH + SHOULDER_H,
+      segment: seg,
+      isDone,
+    })
   }
 }
 

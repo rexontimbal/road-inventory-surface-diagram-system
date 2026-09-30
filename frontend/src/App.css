@@ -400,6 +400,78 @@ tbody tr:last-child td {
   color: var(--text-muted);
   margin: -6px 0 14px;
 }
+
+.print-only-header {
+  display: none;
+}
+.print-strips {
+  display: none;
+}
+
+.completion-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.completion-bar {
+  flex: 1;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--critical-soft);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.completion-bar-fill {
+  height: 100%;
+  background: var(--good);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+.completion-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.diagram-tooltip {
+  position: fixed;
+  z-index: 1000;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  padding: 10px 12px;
+  font-size: 0.76rem;
+  min-width: 190px;
+  pointer-events: none;
+}
+.tooltip-status {
+  font-weight: 700;
+  font-size: 0.75rem;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.tooltip-done {
+  color: var(--good);
+}
+.tooltip-not-done {
+  color: var(--critical);
+}
+.tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-secondary);
+  padding: 1px 0;
+}
+.tooltip-row span:last-child {
+  color: var(--text-primary);
+  font-weight: 500;
+  text-align: right;
+}
 .diagram-canvas-wrap {
   min-height: 220px;
   overflow-x: auto;
@@ -497,6 +569,12 @@ tbody tr:last-child td {
     padding: 0;
     margin: 0;
   }
+  .print-only-header {
+    display: block;
+    font-size: 11pt;
+    margin-bottom: 6px;
+    color: #000;
+  }
   .diagram-canvas-wrap {
     border: none;
     padding: 0;
@@ -509,6 +587,22 @@ tbody tr:last-child td {
      Legal, ...) -- height follows the canvas's own aspect ratio so nothing
      gets stretched or cropped. */
   #diagram-canvas {
+    display: none !important;
+  }
+  .print-strips {
+    display: block !important;
+  }
+  /* Each strip keeps its natural (non-stretched) proportions and is an
+     unbreakable block -- the browser packs as many whole strips as fit on a
+     page, then automatically continues the rest on the next page, instead
+     of forcing exactly one strip per page (wastes space) or treating the
+     whole diagram as one giant unbreakable image (blank leading page). */
+  .print-strips > div {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    margin-bottom: 6mm;
+  }
+  .print-strips canvas {
     width: 100% !important;
     height: auto !important;
     max-width: 100%;
