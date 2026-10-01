@@ -1,4 +1,22 @@
-export default function RoadSelectPanel({ roads, selectedRoadId, onSelect, roadName, onExpand }) {
+import { useState } from 'react'
+
+export default function RoadSelectPanel({ roads, selectedRoadId, onSelect, roadName, onDelete, onExpand }) {
+  const [deleting, setDeleting] = useState(false)
+
+  async function handleDeleteClick() {
+    if (!selectedRoadId) return
+    const confirmed = window.confirm(
+      `Delete road ${selectedRoadId} (${roadName})? This removes all its segments. This cannot be undone.`
+    )
+    if (!confirmed) return
+    setDeleting(true)
+    try {
+      await onDelete(selectedRoadId)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   return (
     <div className="panel">
       <button type="button" className="panel-icon" title="Select Road" onClick={onExpand}>
@@ -31,6 +49,14 @@ export default function RoadSelectPanel({ roads, selectedRoadId, onSelect, roadN
           {roadName || <span className="readonly-placeholder">Auto-filled after selecting a road</span>}
         </div>
       </label>
+      {selectedRoadId && (
+        <button type="button" className="delete-road-link" onClick={handleDeleteClick} disabled={deleting}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          {deleting ? 'Deleting…' : 'Delete this road'}
+        </button>
+      )}
       </div>
     </div>
   )

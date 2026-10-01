@@ -4,8 +4,15 @@ import UploadPanel from './components/sidebar/UploadPanel'
 import RoadSelectPanel from './components/sidebar/RoadSelectPanel'
 import DiagramSettingsPanel from './components/sidebar/DiagramSettingsPanel'
 import RoadInventoryTable from './components/inventory/RoadInventoryTable'
+import NetworkSummaryBar from './components/inventory/NetworkSummaryBar'
 import DiagramPanel from './components/diagram/DiagramPanel'
-import { fetchRoadDetail, fetchRoadsList, fetchSegmentsPage } from './api/roads'
+import {
+  deleteRoad,
+  fetchNetworkSummary,
+  fetchRoadDetail,
+  fetchRoadsList,
+  fetchSegmentsPage,
+} from './api/roads'
 import './App.css'
 
 const PAGE_SIZE = 10
@@ -17,6 +24,8 @@ export default function App() {
   const [segmentsPage, setSegmentsPage] = useState(null)
   const [tablePage, setTablePage] = useState(1)
   const [tableFilters, setTableFilters] = useState({ roadId: '', status: '', surfaceType: '' })
+  const [tableSort, setTableSort] = useState({ sortBy: null, sortDir: 'asc' })
+  const [networkSummary, setNetworkSummary] = useState(null)
   const [settings, setSettings] = useState({ stationIntervalM: 1000, stationsPerLine: 10 })
   const [diagramVersion, setDiagramVersion] = useState(0)
   const [hasGenerated, setHasGenerated] = useState(false)
@@ -27,30 +36,47 @@ export default function App() {
     setRoads(list)
   }
 
-  async function refreshSegmentsPage(page, filters) {
-    const data = await fetchSegmentsPage(page, PAGE_SIZE, filters)
+  async function refreshSegmentsPage(page, filters, sort) {
+    const data = await fetchSegmentsPage(page, PAGE_SIZE, filters, sort)
     setSegmentsPage(data)
+  }
+
+  async function refreshSummary() {
+    const data = await fetchNetworkSummary()
+    setNetworkSummary(data)
   }
 
   useEffect(() => {
     refreshRoads()
-    refreshSegmentsPage(1, tableFilters)
+    refreshSegmentsPage(1, tableFilters, tableSort)
+    refreshSummary()
   }, [])
 
   useEffect(() => {
-    refreshSegmentsPage(tablePage, tableFilters)
+    refreshSegmentsPage(tablePage, tableFilters, tableSort)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tablePage, tableFilters])
+  }, [tablePage, tableFilters, tableSort])
 
   function handleFilterChange(newFilters) {
     setTableFilters(newFilters)
     setTablePage(1)
   }
 
+  function handleSortChange(column) {
+    setTableSort((prev) => {
+      if (prev.sortBy === column) {
+        return { sortBy: column, sortDir: prev.sortDir === 'asc' ? 'desc' : 'asc' }
+      }
+      return { sortBy: column, sortDir: 'asc' }
+    })
+    setTablePage(1)
+  }
+
   async function handleUploaded() {
     await refreshRoads()
     setTablePage(1)
-    await refreshSegmentsPage(1, tableFilters)
+    await refreshSegmentsPage(1, tableFilters, tableSort)
+    await refreshSummary()
   }
 
   async function handleSelectRoad(roadId) {
@@ -62,6 +88,19 @@ export default function App() {
     }
     const detail = await fetchRoadDetail(roadId)
     setRoadDetail(detail)
+  }
+
+  async function handleDeleteRoad(roadId) {
+    await deleteRoad(roadId)
+    if (roadId === selectedRoadId) {
+      setSelectedRoadId('')
+      setRoadDetail(null)
+      setHasGenerated(false)
+    }
+    await refreshRoads()
+    setTablePage(1)
+    await refreshSegmentsPage(1, tableFilters, tableSort)
+    await refreshSummary()
   }
 
   function handleGenerate() {
@@ -101,6 +140,7 @@ export default function App() {
             selectedRoadId={selectedRoadId}
             onSelect={handleSelectRoad}
             roadName={selectedRoadName}
+            onDelete={handleDeleteRoad}
             collapsed={sidebarCollapsed}
             onExpand={() => setSidebarCollapsed(false)}
           />
@@ -114,12 +154,15 @@ export default function App() {
           />
         </aside>
         <main className="content">
+          <NetworkSummaryBar summary={networkSummary} />
           <RoadInventoryTable
             segmentsPage={segmentsPage}
             onPageChange={setTablePage}
             roads={roads}
             filters={tableFilters}
             onFilterChange={handleFilterChange}
+            sort={tableSort}
+            onSortChange={handleSortChange}
           />
           <DiagramPanel
             road={roadDetail ? { roadDetail, settings } : null}

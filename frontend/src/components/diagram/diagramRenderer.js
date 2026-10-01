@@ -1,6 +1,12 @@
 import { fillForCell } from './surfacePatterns'
 
-const STRIP_WIDTH_PX = 1200
+const BASE_STRIP_WIDTH_PX = 1200
+// Minimum horizontal space reserved per station-interval column so its tick
+// label ("Sta. 20+000") always has room to breathe -- packing more intervals
+// into the same fixed width is what caused labels to overlap at high
+// Stations-per-Line settings. The strip grows wider (and the canvas scrolls)
+// rather than letting labels collide.
+const MIN_PX_PER_INTERVAL = 90
 const LEFT_MARGIN = 90
 const RIGHT_MARGIN = 20
 const TOP_MARGIN = 10
@@ -41,8 +47,18 @@ function computeStripPlan(road, settings) {
     : 0
   const laneBandH = globalMaxLanes * LANE_H
   const stripHeight = HEADER_H + STATUS_STRIP_H + SHOULDER_H + laneBandH + SHOULDER_H
-  const canvasWidth = LEFT_MARGIN + STRIP_WIDTH_PX + RIGHT_MARGIN
-  return { stripSpanM, totalLengthM, numStrips, globalMaxLanes, laneBandH, stripHeight, canvasWidth }
+  const stripWidthPx = Math.max(BASE_STRIP_WIDTH_PX, stationsPerLine * MIN_PX_PER_INTERVAL)
+  const canvasWidth = LEFT_MARGIN + stripWidthPx + RIGHT_MARGIN
+  return {
+    stripSpanM,
+    totalLengthM,
+    numStrips,
+    globalMaxLanes,
+    laneBandH,
+    stripHeight,
+    stripWidthPx,
+    canvasWidth,
+  }
 }
 
 export function getNumStrips(road, settings) {
@@ -56,7 +72,7 @@ export function getNumStrips(road, settings) {
 export function renderSingleStrip(canvas, road, settings, stripIndex) {
   const ctx = canvas.getContext('2d')
   const plan = computeStripPlan(road, settings)
-  const pxPerMeter = STRIP_WIDTH_PX / plan.stripSpanM
+  const pxPerMeter = plan.stripWidthPx / plan.stripSpanM
 
   canvas.width = plan.canvasWidth
   canvas.height = TOP_MARGIN + plan.stripHeight + 10
@@ -92,23 +108,20 @@ export function renderSingleStrip(canvas, road, settings, stripIndex) {
  */
 export function renderDiagram(canvas, road, settings) {
   const ctx = canvas.getContext('2d')
-  const { stationIntervalM, stationsPerLine } = settings
-  const stripSpanM = stationIntervalM * stationsPerLine
-  const totalLengthM = road.total_length_m
+  const { stationIntervalM } = settings
   const segments = road.segments
+  const plan = computeStripPlan(road, settings)
 
-  if (totalLengthM <= 0 || segments.length === 0) {
+  if (plan.totalLengthM <= 0 || segments.length === 0) {
     canvas.width = 0
     canvas.height = 0
     return { hitRegions: [] }
   }
 
-  const numStrips = Math.ceil(totalLengthM / stripSpanM)
-  const globalMaxLanes = Math.max(...segments.map((s) => s.num_lanes))
-  const laneBandH = globalMaxLanes * LANE_H
-  const stripHeight = HEADER_H + STATUS_STRIP_H + SHOULDER_H + laneBandH + SHOULDER_H
+  const { numStrips, globalMaxLanes, laneBandH, stripHeight, stripWidthPx, stripSpanM, canvasWidth } = plan
+  const pxPerMeter = stripWidthPx / stripSpanM
 
-  canvas.width = LEFT_MARGIN + STRIP_WIDTH_PX + RIGHT_MARGIN
+  canvas.width = canvasWidth
   canvas.height = TOP_MARGIN + numStrips * stripHeight + (numStrips - 1) * STRIP_GAP + 10
 
   ctx.fillStyle = '#FFFFFF'
@@ -122,8 +135,7 @@ export function renderDiagram(canvas, road, settings) {
     // Anchor each strip's meter-grid to whole-pixel boundaries at the strip
     // start so station ticks land exactly on-pixel too, not just the fills.
     const stripStartM = s * stripSpanM
-    const stripEndM = Math.min((s + 1) * stripSpanM, totalLengthM)
-    const pxPerMeter = STRIP_WIDTH_PX / stripSpanM
+    const stripEndM = Math.min((s + 1) * stripSpanM, plan.totalLengthM)
     const y0 = TOP_MARGIN + s * (stripHeight + STRIP_GAP)
 
     drawStrip(ctx, {

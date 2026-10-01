@@ -84,15 +84,15 @@ export default function DiagramPanel({ road, diagramVersion, hasGenerated }) {
     <div className="panel diagram-panel">
       <div className="panel-header-row">
         <h2>5. Road Surface Diagram</h2>
-        <div className="no-print" style={{ display: 'flex', gap: 8 }}>
-          <button onClick={printDiagram} disabled={!hasGenerated}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <div className="no-print" style={{ display: 'flex', gap: 6 }}>
+          <button className="btn-compact" onClick={printDiagram} disabled={!hasGenerated}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M6 9V4h12v5M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2M6 14h12v6H6z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
             Print / PDF
           </button>
-          <button onClick={exportPng} disabled={!hasGenerated}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <button className="btn-compact" onClick={exportPng} disabled={!hasGenerated}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M12 16V4m0 12-4-4m4 4 4-4M4 18v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
             Export PNG

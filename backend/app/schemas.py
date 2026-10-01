@@ -68,3 +68,18 @@ class UploadResult(BaseModel):
     rejected: list[RoadRejectionOut]
     total_rows_processed: int
     ignored_columns: list[str]
+
+
+class RoadSummaryStat(BaseModel):
+    road_id: str
+    road_name: str
+    total_length_m: int
+    asphalt_length_m: int
+    pct: int
+
+
+class NetworkSummary(BaseModel):
+    total_length_m: int
+    asphalt_length_m: int
+    pct: int
+    roads: list[RoadSummaryStat]

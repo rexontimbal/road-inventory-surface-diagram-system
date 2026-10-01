@@ -14,6 +14,18 @@ async function handleResponse(res) {
   return res.json()
 }
 
+function buildSegmentsParams(filters = {}, sort = {}) {
+  const params = new URLSearchParams()
+  if (filters.roadId) params.set('road_id', filters.roadId)
+  if (filters.status) params.set('status', filters.status)
+  if (filters.surfaceType) params.set('surface_type', filters.surfaceType)
+  if (sort.sortBy) {
+    params.set('sort_by', sort.sortBy)
+    params.set('sort_dir', sort.sortDir || 'asc')
+  }
+  return params
+}
+
 export async function uploadExcel(file) {
   const formData = new FormData()
   formData.append('file', file)
@@ -31,11 +43,25 @@ export async function fetchRoadDetail(roadId) {
   return handleResponse(res)
 }
 
-export async function fetchSegmentsPage(page, pageSize, filters = {}) {
-  const params = new URLSearchParams({ page, page_size: pageSize })
-  if (filters.roadId) params.set('road_id', filters.roadId)
-  if (filters.status) params.set('status', filters.status)
-  if (filters.surfaceType) params.set('surface_type', filters.surfaceType)
+export async function deleteRoad(roadId) {
+  const res = await fetch(`${BASE}/${encodeURIComponent(roadId)}`, { method: 'DELETE' })
+  return handleResponse(res)
+}
+
+export async function fetchSegmentsPage(page, pageSize, filters = {}, sort = {}) {
+  const params = buildSegmentsParams(filters, sort)
+  params.set('page', page)
+  params.set('page_size', pageSize)
   const res = await fetch(`${BASE}/segments?${params.toString()}`)
+  return handleResponse(res)
+}
+
+export function getSegmentsExportUrl(filters = {}, sort = {}) {
+  const params = buildSegmentsParams(filters, sort)
+  return `${BASE}/segments/export?${params.toString()}`
+}
+
+export async function fetchNetworkSummary() {
+  const res = await fetch(`${BASE}/summary`)
   return handleResponse(res)
 }

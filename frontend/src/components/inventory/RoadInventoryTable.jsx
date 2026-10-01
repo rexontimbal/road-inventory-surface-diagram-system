@@ -1,8 +1,30 @@
 import Pagination from './Pagination'
+import { getSegmentsExportUrl } from '../../api/roads'
 
 const SURFACE_TYPE_OPTIONS = ['unpaved', 'paved', 'gravel', 'asphalt']
 
-export default function RoadInventoryTable({ segmentsPage, onPageChange, roads, filters, onFilterChange }) {
+const COLUMNS = [
+  { label: '#', key: null },
+  { label: 'ROAD ID', key: 'road_id' },
+  { label: 'Road Name', key: 'road_name' },
+  { label: 'Start Station', key: 'start_station' },
+  { label: 'End Station', key: 'end_station' },
+  { label: 'Number of Lanes', key: 'num_lanes' },
+  { label: 'Surface Type', key: 'surface_type' },
+  { label: 'Left Shoulder', key: null },
+  { label: 'Right Shoulder', key: null },
+  { label: 'Status', key: 'status' },
+]
+
+export default function RoadInventoryTable({
+  segmentsPage,
+  onPageChange,
+  roads,
+  filters,
+  onFilterChange,
+  sort,
+  onSortChange,
+}) {
   const records = segmentsPage?.records || []
   const hasActiveFilters = !!(filters.roadId || filters.status || filters.surfaceType)
 
@@ -61,22 +83,34 @@ export default function RoadInventoryTable({ segmentsPage, onPageChange, roads, 
             Clear filters
           </button>
         )}
+        <a
+          className="btn-compact export-csv-btn"
+          href={getSegmentsExportUrl(filters, sort)}
+          download
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 16V4m0 12-4-4m4 4 4-4M4 18v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          Export CSV
+        </a>
       </div>
 
       <div className="table-scroll">
         <table>
           <thead>
             <tr>
-              <th>#</th>
-              <th>ROAD ID</th>
-              <th>Road Name</th>
-              <th>Start Station</th>
-              <th>End Station</th>
-              <th>Number of Lanes</th>
-              <th>Surface Type</th>
-              <th>Left Shoulder</th>
-              <th>Right Shoulder</th>
-              <th>Status</th>
+              {COLUMNS.map((col) => (
+                <th
+                  key={col.label}
+                  className={col.key ? 'sortable-th' : ''}
+                  onClick={col.key ? () => onSortChange(col.key) : undefined}
+                >
+                  {col.label}
+                  {col.key && sort.sortBy === col.key && (
+                    <span className="sort-arrow">{sort.sortDir === 'asc' ? ' ▲' : ' ▼'}</span>
+                  )}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>

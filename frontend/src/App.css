@@ -216,6 +216,26 @@ button:disabled {
   width: 100%;
 }
 
+.btn-compact {
+  padding: 5px 10px;
+  font-size: 0.74rem;
+  gap: 5px;
+}
+
+.delete-road-link {
+  background: none;
+  border: none;
+  color: var(--critical);
+  font-size: 0.74rem;
+  padding: 4px 0;
+  gap: 5px;
+  justify-content: flex-start;
+}
+.delete-road-link:hover:not(:disabled) {
+  background: none;
+  text-decoration: underline;
+}
+
 .primary-button {
   width: 100%;
   background: var(--accent);
@@ -424,6 +444,21 @@ button:disabled {
   text-decoration: underline;
   background: none;
 }
+.export-csv-btn {
+  margin-left: auto;
+  text-decoration: none;
+}
+.sortable-th {
+  cursor: pointer;
+  user-select: none;
+}
+.sortable-th:hover {
+  color: var(--accent);
+}
+.sort-arrow {
+  color: var(--accent);
+  font-size: 0.65em;
+}
 
 .inventory-table .table-scroll {
   overflow-x: auto;
@@ -455,13 +490,13 @@ td {
   text-align: left;
 }
 thead th {
-  background: var(--surface-sunken);
-  color: var(--text-secondary);
+  background: #10131a;
+  color: #ffffff;
   font-weight: 600;
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  border-bottom: 1px solid var(--border-strong);
+  border-bottom: 1px solid #10131a;
 }
 tbody tr:hover {
   background: var(--surface-sunken);
@@ -551,6 +586,37 @@ tbody tr:last-child td {
   font-weight: 600;
   color: var(--text-secondary);
   white-space: nowrap;
+}
+
+.network-summary {
+  padding: 14px 20px;
+}
+.network-summary .completion-summary {
+  margin-bottom: 8px;
+}
+.road-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 2.4em;
+  overflow-y: auto;
+}
+.road-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.road-chip-low {
+  background: var(--critical-soft);
+  color: var(--critical);
+}
+.road-chip-ok {
+  background: var(--good-soft);
+  color: var(--good);
 }
 
 .diagram-tooltip {
