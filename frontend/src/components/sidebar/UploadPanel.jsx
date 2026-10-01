@@ -1,5 +1,7 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { uploadExcel } from '../../api/roads'
+
+const AUTO_COLLAPSE_MS = 3000
 
 const REQUIRED_COLUMNS = [
   'ROAD ID',
@@ -18,6 +20,14 @@ export default function UploadPanel({ onUploaded, onExpand }) {
   const [uploading, setUploading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
+  const [resultExpanded, setResultExpanded] = useState(true)
+
+  useEffect(() => {
+    if (!result) return
+    setResultExpanded(true)
+    const timer = setTimeout(() => setResultExpanded(false), AUTO_COLLAPSE_MS)
+    return () => clearTimeout(timer)
+  }, [result])
 
   async function handleFileChange(e) {
     const file = e.target.files?.[0]
@@ -79,8 +89,31 @@ export default function UploadPanel({ onUploaded, onExpand }) {
         </div>
       )}
 
-      {result && (
+      {result && !resultExpanded && (
+        <button
+          type="button"
+          className="upload-result-collapsed"
+          onClick={() => setResultExpanded(true)}
+        >
+          {result.imported.length > 0 && (
+            <span className="collapsed-chip collapsed-chip-good">
+              ✓ {result.imported.length} uploaded
+            </span>
+          )}
+          {result.rejected.length > 0 && (
+            <span className="collapsed-chip collapsed-chip-critical">
+              ✕ {result.rejected.length} rejected
+            </span>
+          )}
+          <span className="collapsed-expand-hint">View details</span>
+        </button>
+      )}
+
+      {result && resultExpanded && (
         <div className="upload-result">
+          <button type="button" className="minimize-result-btn" onClick={() => setResultExpanded(false)}>
+            ▾ Minimize
+          </button>
           {result.imported.length > 0 && (
             <div className="feedback-card feedback-good">
               <span className="feedback-icon" aria-hidden="true">✓</span>

@@ -295,6 +295,53 @@ button:disabled {
   margin-bottom: 2px;
 }
 
+/* Collapsed upload-result summary (auto-minimizes after a few seconds so a
+   large multi-road upload doesn't permanently stretch the sidebar) */
+.upload-result-collapsed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-sunken);
+  font-size: 0.76rem;
+  text-align: left;
+}
+.upload-result-collapsed:hover {
+  background: var(--border);
+}
+.collapsed-chip {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.collapsed-chip-good {
+  color: var(--good);
+}
+.collapsed-chip-critical {
+  color: var(--critical);
+}
+.collapsed-expand-hint {
+  margin-left: auto;
+  color: var(--accent);
+}
+.minimize-result-btn {
+  display: block;
+  margin-left: auto;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  color: var(--accent);
+  font-size: 0.72rem;
+}
+.minimize-result-btn:hover {
+  background: none;
+  text-decoration: underline;
+}
+
 /* Feedback cards (upload results) */
 .feedback-card {
   display: flex;
