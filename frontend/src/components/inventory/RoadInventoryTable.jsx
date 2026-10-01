@@ -1,7 +1,18 @@
 import Pagination from './Pagination'
 
-export default function RoadInventoryTable({ segmentsPage, onPageChange }) {
+const SURFACE_TYPE_OPTIONS = ['unpaved', 'paved', 'gravel', 'asphalt']
+
+export default function RoadInventoryTable({ segmentsPage, onPageChange, roads, filters, onFilterChange }) {
   const records = segmentsPage?.records || []
+  const hasActiveFilters = !!(filters.roadId || filters.status || filters.surfaceType)
+
+  function updateFilter(key, value) {
+    onFilterChange({ ...filters, [key]: value })
+  }
+
+  function clearFilters() {
+    onFilterChange({ roadId: '', status: '', surfaceType: '' })
+  }
 
   return (
     <div className="panel inventory-table">
@@ -13,6 +24,45 @@ export default function RoadInventoryTable({ segmentsPage, onPageChange }) {
           </span>
         )}
       </div>
+
+      <div className="filter-bar">
+        <label className="filter-field">
+          <span>Road</span>
+          <select value={filters.roadId} onChange={(e) => updateFilter('roadId', e.target.value)}>
+            <option value="">All roads</option>
+            {roads.map((r) => (
+              <option key={r.road_id} value={r.road_id}>
+                {r.road_id} — {r.road_name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="filter-field">
+          <span>Status</span>
+          <select value={filters.status} onChange={(e) => updateFilter('status', e.target.value)}>
+            <option value="">All statuses</option>
+            <option value="Complete">Complete</option>
+            <option value="Incomplete">Incomplete</option>
+          </select>
+        </label>
+        <label className="filter-field">
+          <span>Surface Type</span>
+          <select value={filters.surfaceType} onChange={(e) => updateFilter('surfaceType', e.target.value)}>
+            <option value="">All surface types</option>
+            {SURFACE_TYPE_OPTIONS.map((s) => (
+              <option key={s} value={s}>
+                {s.charAt(0).toUpperCase() + s.slice(1)}
+              </option>
+            ))}
+          </select>
+        </label>
+        {hasActiveFilters && (
+          <button className="filter-clear" onClick={clearFilters}>
+            Clear filters
+          </button>
+        )}
+      </div>
+
       <div className="table-scroll">
         <table>
           <thead>
@@ -33,7 +83,9 @@ export default function RoadInventoryTable({ segmentsPage, onPageChange }) {
             {records.length === 0 && (
               <tr>
                 <td colSpan={10} className="empty-row">
-                  No data. Upload an Excel file to begin.
+                  {hasActiveFilters
+                    ? 'No records match the selected filters.'
+                    : 'No data. Upload an Excel file to begin.'}
                 </td>
               </tr>
             )}

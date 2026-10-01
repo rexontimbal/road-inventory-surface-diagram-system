@@ -16,6 +16,7 @@ export default function App() {
   const [roadDetail, setRoadDetail] = useState(null)
   const [segmentsPage, setSegmentsPage] = useState(null)
   const [tablePage, setTablePage] = useState(1)
+  const [tableFilters, setTableFilters] = useState({ roadId: '', status: '', surfaceType: '' })
   const [settings, setSettings] = useState({ stationIntervalM: 1000, stationsPerLine: 10 })
   const [diagramVersion, setDiagramVersion] = useState(0)
   const [hasGenerated, setHasGenerated] = useState(false)
@@ -26,25 +27,30 @@ export default function App() {
     setRoads(list)
   }
 
-  async function refreshSegmentsPage(page) {
-    const data = await fetchSegmentsPage(page, PAGE_SIZE)
+  async function refreshSegmentsPage(page, filters) {
+    const data = await fetchSegmentsPage(page, PAGE_SIZE, filters)
     setSegmentsPage(data)
   }
 
   useEffect(() => {
     refreshRoads()
-    refreshSegmentsPage(1)
+    refreshSegmentsPage(1, tableFilters)
   }, [])
 
   useEffect(() => {
-    refreshSegmentsPage(tablePage)
+    refreshSegmentsPage(tablePage, tableFilters)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tablePage])
+  }, [tablePage, tableFilters])
+
+  function handleFilterChange(newFilters) {
+    setTableFilters(newFilters)
+    setTablePage(1)
+  }
 
   async function handleUploaded() {
     await refreshRoads()
     setTablePage(1)
-    await refreshSegmentsPage(1)
+    await refreshSegmentsPage(1, tableFilters)
   }
 
   async function handleSelectRoad(roadId) {
@@ -108,7 +114,13 @@ export default function App() {
           />
         </aside>
         <main className="content">
-          <RoadInventoryTable segmentsPage={segmentsPage} onPageChange={setTablePage} />
+          <RoadInventoryTable
+            segmentsPage={segmentsPage}
+            onPageChange={setTablePage}
+            roads={roads}
+            filters={tableFilters}
+            onFilterChange={handleFilterChange}
+          />
           <DiagramPanel
             road={roadDetail ? { roadDetail, settings } : null}
             diagramVersion={diagramVersion}

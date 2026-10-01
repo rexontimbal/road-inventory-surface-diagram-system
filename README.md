@@ -16,6 +16,14 @@ are already asphalted ("spalto" = done) versus not.
 
 ## Running in development
 
+### Quick start: `start.bat`
+
+Double-click `start.bat` at the project root. It opens the backend and
+frontend each in their own window and opens the app in your browser once
+both are up. Requires the one-time setup below to have been done already
+(venv created + `pip install`, `npm install`). To stop, just close the two
+server windows.
+
 ### Backend (port 8000)
 
 ```powershell
@@ -23,8 +31,13 @@ cd backend
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+Use `python -m uvicorn` (not the bare `uvicorn` command) — on a machine with
+an Application Control / Device Guard policy, the `uvicorn.exe` shim in
+`venv\Scripts` gets blocked as an unapproved executable, while running it as
+a module through `python.exe` is unaffected.
 
 API docs available at `http://localhost:8000/docs`.
 

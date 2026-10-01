@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -101,19 +100,37 @@ def list_roads(db: Session = Depends(get_db)):
 
 
 @router.get("/segments", response_model=SegmentsPage)
-def list_segments(page: int = 1, page_size: int = 20, db: Session = Depends(get_db)):
+def list_segments(
+    page: int = 1,
+    page_size: int = 20,
+    road_id: str | None = None,
+    status: str | None = None,
+    surface_type: str | None = None,
+    db: Session = Depends(get_db),
+):
     if page < 1:
         raise HTTPException(status_code=400, detail="page must be >= 1")
     if page_size < 1 or page_size > 500:
         raise HTTPException(status_code=400, detail="page_size must be between 1 and 500")
+    if status is not None and status not in ("Complete", "Incomplete"):
+        raise HTTPException(status_code=400, detail="status must be 'Complete' or 'Incomplete'")
 
-    total_records = db.query(func.count(RoadSegment.id)).scalar() or 0
+    base_query = db.query(RoadSegment, Road.road_name).join(Road, Road.road_id == RoadSegment.road_id)
+
+    if road_id:
+        base_query = base_query.filter(RoadSegment.road_id == road_id)
+    if surface_type:
+        base_query = base_query.filter(RoadSegment.surface_type == surface_type)
+    if status == "Complete":
+        base_query = base_query.filter(RoadSegment.surface_type == "asphalt")
+    elif status == "Incomplete":
+        base_query = base_query.filter(RoadSegment.surface_type != "asphalt")
+
+    total_records = base_query.count()
     total_pages = max(1, (total_records + page_size - 1) // page_size)
 
     rows = (
-        db.query(RoadSegment, Road.road_name)
-        .join(Road, Road.road_id == RoadSegment.road_id)
-        .order_by(RoadSegment.road_id, RoadSegment.seq_no)
+        base_query.order_by(RoadSegment.road_id, RoadSegment.seq_no)
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()

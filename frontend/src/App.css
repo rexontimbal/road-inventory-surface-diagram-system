@@ -98,9 +98,9 @@
 
 .panel {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-sm);
+  border: none;
+  border-radius: 14px;
+  box-shadow: var(--shadow-card);
   padding: 18px 20px;
 }
 .panel h2 {
@@ -135,11 +135,14 @@
 }
 .panel select,
 .panel input[type='text'] {
-  padding: 8px 10px;
+  height: 32px;
+  padding: 0 8px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text-primary);
+  font-size: 0.8rem;
+  line-height: 30px;
   transition: border-color 0.15s ease;
 }
 .panel select:focus,
@@ -149,13 +152,16 @@
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .readonly-display {
-  padding: 8px 10px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-sm);
   background: var(--surface-sunken);
   color: var(--text-primary);
-  font-size: 0.85rem;
-  min-height: 1.3em;
+  font-size: 0.8rem;
+  box-sizing: border-box;
 }
 .readonly-placeholder {
   color: var(--text-muted);
@@ -372,6 +378,53 @@ button:disabled {
 }
 
 /* Inventory table */
+.filter-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.filter-field select {
+  padding: 4px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 0.76rem;
+  font-weight: 400;
+  text-transform: none;
+  width: 130px;
+}
+.filter-field select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.filter-clear {
+  font-size: 0.78rem;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 7px 4px;
+}
+.filter-clear:hover {
+  text-decoration: underline;
+  background: none;
+}
+
 .inventory-table .table-scroll {
   overflow-x: auto;
   border-radius: var(--radius-sm);
@@ -388,6 +441,18 @@ td {
   text-align: left;
   white-space: nowrap;
   border-bottom: 1px solid var(--border);
+}
+
+/* Inventory table: center every column except Road ID and Road Name */
+.inventory-table table th,
+.inventory-table table td {
+  text-align: center;
+}
+.inventory-table table th:nth-child(2),
+.inventory-table table td:nth-child(2),
+.inventory-table table th:nth-child(3),
+.inventory-table table td:nth-child(3) {
+  text-align: left;
 }
 thead th {
   background: var(--surface-sunken);
@@ -433,10 +498,14 @@ tbody tr:last-child td {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 18px;
+  gap: 14px;
   margin-top: 14px;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   color: var(--text-secondary);
+}
+.pagination button {
+  padding: 4px 9px;
+  font-size: 0.76rem;
 }
 
 .page-summary {

@@ -31,7 +31,11 @@ export async function fetchRoadDetail(roadId) {
   return handleResponse(res)
 }
 
-export async function fetchSegmentsPage(page, pageSize) {
-  const res = await fetch(`${BASE}/segments?page=${page}&page_size=${pageSize}`)
+export async function fetchSegmentsPage(page, pageSize, filters = {}) {
+  const params = new URLSearchParams({ page, page_size: pageSize })
+  if (filters.roadId) params.set('road_id', filters.roadId)
+  if (filters.status) params.set('status', filters.status)
+  if (filters.surfaceType) params.set('surface_type', filters.surfaceType)
+  const res = await fetch(`${BASE}/segments?${params.toString()}`)
   return handleResponse(res)
 }

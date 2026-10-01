@@ -22,6 +22,8 @@
   --header-subtext: #9aa3b5;
   --shadow-sm: 0 1px 2px rgba(11, 11, 11, 0.06);
   --shadow-md: 0 2px 10px rgba(11, 11, 11, 0.08);
+  --shadow-card: 0 1px 2px rgba(11, 11, 11, 0.04), 0 10px 30px rgba(11, 11, 11, 0.07);
+  --page-gradient: radial-gradient(1800px circle at 50% 0%, #d8e9fb 0%, #eaf2fb 42%, #f9f9f7 78%);
   --radius: 10px;
   --radius-sm: 6px;
 }
@@ -51,6 +53,8 @@
     --header-subtext: #8891a3;
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 2px 10px rgba(0, 0, 0, 0.5);
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.35), 0 12px 32px rgba(0, 0, 0, 0.45);
+    --page-gradient: radial-gradient(1800px circle at 50% 0%, #1b2d4a 0%, #151a22 42%, #0d0d0d 78%);
   }
 }
 
@@ -61,7 +65,8 @@
 body {
   margin: 0;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  background: var(--page);
+  background: var(--page-gradient), var(--page);
+  background-attachment: fixed;
   color: var(--text-primary);
 }
 
