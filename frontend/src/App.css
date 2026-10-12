@@ -2,6 +2,20 @@
   min-height: 100vh;
 }
 
+/* Reserves the header's footprint in normal flow. The header itself is
+   position:fixed (removed from flow) so its "shrink" visual never changes
+   the document's scrollable height -- that growth/shrink-of-content-height
+   feedback loop was what caused the scroll-position flicker. This spacer
+   stays a constant 72px regardless of the header's shrunk/expanded state. */
+.app-header-spacer {
+  height: 72px;
+}
+@media print {
+  .app-header-spacer {
+    display: none;
+  }
+}
+
 /* Reusable thin, blue-tinted scrollbar for scrollable panels throughout
    the app (upload summary, inventory table, diagram wrap, chip rows). */
 .thin-scroll {
@@ -30,30 +44,196 @@
 }
 
 .app-header {
-  background: var(--header-bg);
-  color: var(--header-text);
-  padding: 18px 28px;
-  border-bottom: 1px solid var(--border);
+  box-sizing: border-box;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  height: 72px;
+  color: #fff;
+  background: linear-gradient(90deg, #0f172a, #1e293b);
+  border-bottom: 2px solid transparent;
+  border-image: linear-gradient(90deg, #2563eb, #4ade80) 1;
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  overflow: hidden;
+  transition: box-shadow 200ms ease;
 }
-.app-header-title-row {
+.app-header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: radial-gradient(circle at 0% 50%, rgba(37, 99, 235, 0.15), transparent 70%);
+  pointer-events: none;
+}
+.app-header::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  left: 55%;
+  background-image: repeating-linear-gradient(
+    -35deg,
+    rgba(255, 255, 255, 0.05) 0 10px,
+    transparent 10px 24px
+  );
+  pointer-events: none;
+}
+.app-header-shrunk {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+.app-header-inner {
+  position: relative;
+  z-index: 1;
+  max-width: 1600px;
+  height: 100%;
+  margin: 0 auto;
+  padding: 0 20px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 16px;
+}
+.app-header-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.app-logo-wrap {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #2563eb;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 4px 14px rgba(37, 99, 235, 0.45);
+  transition: width 200ms ease, height 200ms ease;
+}
+.app-header-shrunk .app-logo-wrap {
+  width: 32px;
+  height: 32px;
 }
 .app-logo {
-  flex-shrink: 0;
+  display: block;
   border-radius: 6px;
+}
+.app-header-title-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
 }
 .app-header h1 {
   margin: 0;
-  font-size: 1.3rem;
+  font-size: 19px;
   font-weight: 600;
   letter-spacing: -0.01em;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: font-size 200ms ease;
+}
+.app-header-shrunk h1 {
+  font-size: 16px;
 }
 .app-header p {
-  margin: 3px 0 0;
-  font-size: 0.85rem;
-  color: var(--header-subtext);
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: #94a3b8;
+}
+.app-header-right {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.header-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.header-stat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #e2e8f0;
+  white-space: nowrap;
+}
+.header-stat-chip-good {
+  color: #4ade80;
+}
+.header-last-upload {
+  font-size: 11.5px;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+.header-help-btn {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.header-help-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.how-to-use-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+}
+.how-to-use-list li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.how-to-use-step-n {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (max-width: 1024px) {
+  .app-header p,
+  .header-last-upload {
+    display: none;
+  }
+}
+@media (max-width: 768px) {
+  .header-stats,
+  .header-last-upload {
+    display: none;
+  }
 }
 
 .main-layout {
@@ -239,6 +419,8 @@
 }
 .range-reset-link:hover {
   background: none;
+  border-color: transparent;
+  color: var(--accent-hover);
   text-decoration: underline;
 }
 .range-error {
@@ -247,11 +429,18 @@
   color: var(--critical);
 }
 
+/* ===== Unified button system =====
+   Every state (default/hover/active/disabled/focus) sets its own background
+   AND text color explicitly -- nothing is left to inherit from a sibling
+   state, so a hover rule can never land on "light text on light bg". Base
+   <button> = secondary (outline) style; .btn-primary/.btn-danger/.btn-link
+   are the filled/link variants layered on top. */
 button {
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
+  box-sizing: border-box;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
   border-radius: var(--radius-sm);
-  color: var(--text-primary);
+  color: #1e293b;
   padding: 9px 14px;
   font-size: 0.82rem;
   font-weight: 500;
@@ -259,28 +448,53 @@ button {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
 }
-button:hover:not(:disabled) {
-  background: var(--surface-sunken);
-  border-color: var(--text-muted);
+button:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  color: #1e293b;
 }
-button:active:not(:disabled) {
+button:active {
+  background: #e2e8f0;
   transform: translateY(1px);
 }
 button:disabled {
-  opacity: 0.45;
+  background: #e2e8f0;
+  border-color: #e2e8f0;
+  color: #94a3b8;
   cursor: not-allowed;
+  transform: none;
+}
+button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35);
 }
 
-.btn-primary {
+.btn-primary,
+.primary-button {
   background: var(--accent);
+  border-color: var(--accent);
   color: #ffffff;
-  border: 1px solid var(--accent);
 }
-.btn-primary:hover:not(:disabled) {
+.btn-primary:hover,
+.primary-button:hover {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
+  color: #ffffff;
+}
+.btn-primary:active,
+.primary-button:active {
+  background: var(--accent-active);
+  border-color: var(--accent-active);
+  color: #ffffff;
+}
+.btn-primary:disabled,
+.primary-button:disabled {
+  background: #e2e8f0;
+  border-color: #e2e8f0;
+  color: #94a3b8;
 }
 .btn-block {
   width: 100%;
@@ -292,38 +506,73 @@ button:disabled {
   gap: 5px;
 }
 
+.btn-danger {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #ffffff;
+}
+.btn-danger:hover {
+  background: #b91c1c;
+  border-color: #b91c1c;
+  color: #ffffff;
+}
+.btn-danger:disabled {
+  background: #e2e8f0;
+  border-color: #e2e8f0;
+  color: #94a3b8;
+}
+
+/* Text-only link buttons: Clear filters, Reset to range, Export CSV,
+   View details / Minimize. */
+.btn-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-weight: 500;
+}
+.btn-link:hover {
+  background: none;
+  border-color: transparent;
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+.btn-link:disabled {
+  background: none;
+  border-color: transparent;
+  color: #94a3b8;
+  text-decoration: none;
+}
+
 .delete-road-link {
   background: none;
   border: none;
-  color: var(--critical);
+  color: #dc2626;
   font-size: 0.74rem;
   padding: 4px 0;
   gap: 5px;
   justify-content: flex-start;
 }
-.delete-road-link:hover:not(:disabled) {
+.delete-road-link:hover {
   background: none;
+  border-color: transparent;
+  color: #b91c1c;
   text-decoration: underline;
+}
+.delete-road-link:disabled {
+  background: none;
+  border-color: transparent;
+  color: #94a3b8;
+  text-decoration: none;
 }
 
 .primary-button {
   width: 100%;
   height: 40px;
-  background: var(--accent);
-  color: #fff;
-  border: 1px solid var(--accent);
   border-radius: 8px;
   font-weight: 600;
   padding: 0 11px;
   font-size: 0.85rem;
-}
-.primary-button:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
-}
-.primary-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .spinner {
@@ -425,6 +674,8 @@ button:disabled {
 }
 .upload-summary-toggle:hover {
   background: none;
+  border-color: transparent;
+  color: var(--accent-hover);
   text-decoration: underline;
 }
 .upload-summary-body {
@@ -668,13 +919,29 @@ button:disabled {
 .filter-bar .filter-clear:hover {
   text-decoration: underline;
   background: none;
+  border-color: transparent;
+  color: var(--accent-hover);
 }
 .filter-bar .export-csv-btn {
   height: 32px;
   display: inline-flex;
   align-items: center;
   margin: 0;
+  background: none;
+  border: none;
+  padding: 0 4px;
+  color: var(--accent);
   text-decoration: none;
+}
+.filter-bar .export-csv-btn:hover {
+  background: none;
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+.filter-bar .export-csv-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35);
+  border-radius: var(--radius-sm);
 }
 .sortable-th {
   cursor: pointer;
@@ -1199,12 +1466,14 @@ tbody tr:last-child td {
   font-weight: 600;
 }
 .modal-btn-cancel {
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
-  color: var(--text-primary);
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #1e293b;
 }
 .modal-btn-cancel:hover {
-  background: var(--surface-sunken);
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  color: #1e293b;
 }
 .modal-btn-confirm {
   background: var(--accent);
@@ -1213,14 +1482,22 @@ tbody tr:last-child td {
 }
 .modal-btn-confirm:hover {
   background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: #fff;
+}
+.modal-btn-confirm:active {
+  background: var(--accent-active);
+  border-color: var(--accent-active);
 }
 .modal-btn-danger {
-  background: var(--critical);
-  border: 1px solid var(--critical);
+  background: #dc2626;
+  border: 1px solid #dc2626;
   color: #fff;
 }
 .modal-btn-danger:hover {
-  background: #b32e2e;
+  background: #b91c1c;
+  border-color: #b91c1c;
+  color: #fff;
 }
 
 /* ===== Toast stack ===== */

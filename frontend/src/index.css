@@ -8,8 +8,9 @@
   --text-muted: #898781;
   --border: #e1e0d9;
   --border-strong: #c3c2b7;
-  --accent: #2a78d6;
-  --accent-hover: #1c5cab;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-active: #1e40af;
   --accent-soft: #eaf2fc;
   --good: #006300;
   --good-soft: #e6f5e6;
@@ -47,6 +48,7 @@
     --border-strong: #383835;
     --accent: #3987e5;
     --accent-hover: #5598e7;
+    --accent-active: #2563eb;
     --accent-soft: #16273d;
     --good: #0ca30c;
     --good-soft: #10240f;

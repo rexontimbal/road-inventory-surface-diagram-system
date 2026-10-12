@@ -34,6 +34,7 @@ export default function App() {
   const [diagramVersion, setDiagramVersion] = useState(0)
   const [hasGenerated, setHasGenerated] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [lastUploadAt, setLastUploadAt] = useState(null)
 
   async function refreshRoads() {
     const list = await fetchRoadsList()
@@ -94,6 +95,7 @@ export default function App() {
     setTablePage(1)
     await refreshSegmentsPage(1, tableFilters, tableSort)
     await refreshSummary()
+    setLastUploadAt(new Date())
   }
 
   async function handleSelectRoad(roadId) {
@@ -148,7 +150,7 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <Header />
+      <Header summary={networkSummary} lastUploadAt={lastUploadAt} />
       <div className="main-layout">
         <aside className={`sidebar${sidebarCollapsed ? ' collapsed' : ''}`}>
           <button
