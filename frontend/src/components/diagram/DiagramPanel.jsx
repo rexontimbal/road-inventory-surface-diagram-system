@@ -1,13 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { renderDiagram, renderSingleStrip, getNumStrips } from './diagramRenderer'
+import { formatStation } from '../../utils/chainage'
 import Legend from './Legend'
 
-function computeCompletion(roadDetail) {
+// Sums only the portion of each segment that falls inside `range` (if given)
+// so the completion % reflects just the selected station range, not the
+// whole road -- a segment straddling a range boundary is clipped, not
+// counted in full or dropped.
+function computeCompletion(roadDetail, range) {
   if (!roadDetail || !roadDetail.segments.length) return null
+  const startM = range ? range.startM : 0
+  const endM = range ? range.endM : roadDetail.total_length_m
+  if (startM === null || endM === null || startM >= endM) return null
+
   let doneM = 0
-  const totalM = roadDetail.total_length_m
+  let totalM = 0
   for (const seg of roadDetail.segments) {
-    if (seg.surface_type === 'asphalt') doneM += seg.end_m - seg.start_m
+    const clipStart = Math.max(seg.start_m, startM)
+    const clipEnd = Math.min(seg.end_m, endM)
+    if (clipEnd <= clipStart) continue
+    const len = clipEnd - clipStart
+    totalM += len
+    if (seg.surface_type === 'asphalt') doneM += len
   }
   const pct = totalM > 0 ? Math.round((doneM / totalM) * 100) : 0
   return { pct, doneM, totalM }
@@ -20,7 +34,7 @@ export default function DiagramPanel({ road, diagramVersion, hasGenerated }) {
   const [tooltip, setTooltip] = useState(null)
 
   const numStrips = useMemo(
-    () => (road ? getNumStrips(road.roadDetail, road.settings) : 0),
+    () => (road ? getNumStrips(road.roadDetail, road.settings, road.range) : 0),
     [road, diagramVersion]
   )
 
@@ -30,28 +44,33 @@ export default function DiagramPanel({ road, diagramVersion, hasGenerated }) {
 
   useEffect(() => {
     if (!road || !canvasRef.current) return
-    const result = renderDiagram(canvasRef.current, road.roadDetail, road.settings)
+    const result = renderDiagram(canvasRef.current, road.roadDetail, road.settings, road.range)
     hitRegionsRef.current = result?.hitRegions || []
 
     // One canvas per strip for print, sized to fit one page each -- avoids
     // the browser pushing the whole tall combined canvas to a near-empty
     // leading page before it "fits".
     printCanvasRefs.current.slice(0, numStrips).forEach((c, i) => {
-      if (c) renderSingleStrip(c, road.roadDetail, road.settings, i)
+      if (c) renderSingleStrip(c, road.roadDetail, road.settings, i, road.range)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [diagramVersion, numStrips])
 
   const completion = useMemo(
-    () => (hasGenerated ? computeCompletion(road?.roadDetail) : null),
+    () => (hasGenerated ? computeCompletion(road?.roadDetail, road?.range) : null),
     [hasGenerated, road]
   )
+
+  function rangeSuffix() {
+    if (!road?.range) return ''
+    return `_Sta${formatStation(road.range.startM)}-${formatStation(road.range.endM)}`
+  }
 
   function exportPng() {
     const canvas = canvasRef.current
     if (!canvas || canvas.width === 0) return
     const link = document.createElement('a')
-    link.download = `${road.roadDetail.road_name}_${road.roadDetail.road_id}_diagram.png`
+    link.download = `${road.roadDetail.road_id}${rangeSuffix()}.png`
     link.href = canvas.toDataURL('image/png')
     link.click()
   }
@@ -109,6 +128,12 @@ export default function DiagramPanel({ road, diagramVersion, hasGenerated }) {
           <span className="completion-label">
             {completion.pct}% Asphalted ({(completion.doneM / 1000).toFixed(1)} km of{' '}
             {(completion.totalM / 1000).toFixed(1)} km)
+            {road?.range && (
+              <>
+                {' '}
+                &middot; Sta. {formatStation(road.range.startM)} &ndash; {formatStation(road.range.endM)}
+              </>
+            )}
           </span>
         </div>
       )}
@@ -141,8 +166,14 @@ export default function DiagramPanel({ road, diagramVersion, hasGenerated }) {
             <div key={i}>
               {i === 0 && (
                 <div className="print-only-header">
-                  <strong>{road.roadDetail.road_name}</strong> ({road.roadDetail.road_id}) &mdash;
-                  Generated {new Date().toLocaleDateString()}
+                  <strong>{road.roadDetail.road_name}</strong> ({road.roadDetail.road_id})
+                  {road.range && (
+                    <>
+                      {' '}
+                      &mdash; Sta. {formatStation(road.range.startM)}&ndash;{formatStation(road.range.endM)}
+                    </>
+                  )}
+                  {' '}&mdash; Generated {new Date().toLocaleDateString()}
                 </div>
               )}
               <canvas ref={(el) => (printCanvasRefs.current[i] = el)} />

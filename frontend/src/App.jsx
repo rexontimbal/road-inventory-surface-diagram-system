@@ -13,6 +13,8 @@ import {
   fetchRoadsList,
   fetchSegmentsPage,
 } from './api/roads'
+import { formatStation, parseStationInput } from './utils/chainage'
+import { showToast } from './components/common/DialogProvider'
 import './App.css'
 
 const PAGE_SIZE = 10
@@ -27,6 +29,8 @@ export default function App() {
   const [tableSort, setTableSort] = useState({ sortBy: null, sortDir: 'asc' })
   const [networkSummary, setNetworkSummary] = useState(null)
   const [settings, setSettings] = useState({ stationIntervalM: 1000, stationsPerLine: 10 })
+  const [range, setRange] = useState({ startRaw: '', endRaw: '' })
+  const [generatedRange, setGeneratedRange] = useState(null)
   const [diagramVersion, setDiagramVersion] = useState(0)
   const [hasGenerated, setHasGenerated] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -82,12 +86,21 @@ export default function App() {
   async function handleSelectRoad(roadId) {
     setSelectedRoadId(roadId)
     setHasGenerated(false)
+    setGeneratedRange(null)
     if (!roadId) {
       setRoadDetail(null)
+      setRange({ startRaw: '', endRaw: '' })
       return
     }
     const detail = await fetchRoadDetail(roadId)
     setRoadDetail(detail)
+    if (detail.segments.length) {
+      const minM = detail.segments[0].start_m
+      const maxM = detail.segments[detail.segments.length - 1].end_m
+      setRange({ startRaw: formatStation(minM), endRaw: formatStation(maxM) })
+    } else {
+      setRange({ startRaw: '', endRaw: '' })
+    }
   }
 
   async function handleDeleteRoad(roadId) {
@@ -101,10 +114,15 @@ export default function App() {
     setTablePage(1)
     await refreshSegmentsPage(1, tableFilters, tableSort)
     await refreshSummary()
+    showToast({ variant: 'success', message: `Road ${roadId} deleted` })
   }
 
   function handleGenerate() {
     if (!roadDetail) return
+    const startM = parseStationInput(range.startRaw)
+    const endM = parseStationInput(range.endRaw)
+    if (startM === null || endM === null || startM >= endM) return
+    setGeneratedRange({ startM, endM })
     setHasGenerated(true)
     setDiagramVersion((v) => v + 1)
   }
@@ -145,6 +163,9 @@ export default function App() {
             onExpand={() => setSidebarCollapsed(false)}
           />
           <DiagramSettingsPanel
+            road={roadDetail}
+            range={range}
+            onRangeChange={setRange}
             settings={settings}
             onChange={setSettings}
             onGenerate={handleGenerate}
@@ -165,7 +186,7 @@ export default function App() {
             onSortChange={handleSortChange}
           />
           <DiagramPanel
-            road={roadDetail ? { roadDetail, settings } : null}
+            road={roadDetail ? { roadDetail, settings, range: generatedRange } : null}
             diagramVersion={diagramVersion}
             hasGenerated={hasGenerated}
           />

@@ -1,13 +1,23 @@
 import { useState } from 'react'
+import { showConfirm } from '../common/DialogProvider'
 
 export default function RoadSelectPanel({ roads, selectedRoadId, onSelect, roadName, onDelete, onExpand }) {
   const [deleting, setDeleting] = useState(false)
 
   async function handleDeleteClick() {
     if (!selectedRoadId) return
-    const confirmed = window.confirm(
-      `Delete road ${selectedRoadId} (${roadName})? This removes all its segments. This cannot be undone.`
-    )
+    const confirmed = await showConfirm({
+      title: 'Delete road?',
+      message: (
+        <>
+          <strong>{selectedRoadId} — {roadName}</strong> and all its segments will be removed. This cannot be
+          undone.
+        </>
+      ),
+      confirmText: 'Delete road',
+      cancelText: 'Cancel',
+      variant: 'danger',
+    })
     if (!confirmed) return
     setDeleting(true)
     try {

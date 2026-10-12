@@ -36,14 +36,26 @@ function px(v) {
 }
 
 // Shared layout math used by both the combined multi-strip canvas (on-screen
-// view) and the one-canvas-per-strip print path.
-function computeStripPlan(road, settings) {
+// view) and the one-canvas-per-strip print path. `range` (optional)
+// restricts the diagram to a station sub-range of the road: { startM, endM }
+// in absolute meters. When omitted, the full road is used (baseM = 0).
+function computeStripPlan(road, settings, range) {
   const { stationIntervalM, stationsPerLine } = settings
   const stripSpanM = stationIntervalM * stationsPerLine
-  const totalLengthM = road.total_length_m
+  const baseM = range ? range.startM : 0
+  const totalLengthM = range
+    ? Math.max(0, range.endM - range.startM)
+    : road.total_length_m
   const numStrips = totalLengthM > 0 ? Math.ceil(totalLengthM / stripSpanM) : 0
-  const globalMaxLanes = road.segments.length
-    ? Math.max(...road.segments.map((s) => s.num_lanes))
+
+  // Only segments actually visible within the range drive the lane-row band
+  // height, so a narrowed range isn't padded for lanes that never appear in it.
+  const relevantSegments = range
+    ? road.segments.filter((s) => s.end_m > range.startM && s.start_m < range.endM)
+    : road.segments
+
+  const globalMaxLanes = relevantSegments.length
+    ? Math.max(...relevantSegments.map((s) => s.num_lanes))
     : 0
   const laneBandH = globalMaxLanes * LANE_H
   const stripHeight = HEADER_H + STATUS_STRIP_H + SHOULDER_H + laneBandH + SHOULDER_H
@@ -58,20 +70,22 @@ function computeStripPlan(road, settings) {
     stripHeight,
     stripWidthPx,
     canvasWidth,
+    baseM,
+    relevantSegments,
   }
 }
 
-export function getNumStrips(road, settings) {
-  return computeStripPlan(road, settings).numStrips
+export function getNumStrips(road, settings, range) {
+  return computeStripPlan(road, settings, range).numStrips
 }
 
 // Renders exactly one strip (one page's worth) onto `canvas`, sized to fit
 // just that strip -- used for print, where each strip becomes its own page
 // instead of one tall image the browser would otherwise paginate awkwardly
 // (leaving a near-blank leading page before the image "fits").
-export function renderSingleStrip(canvas, road, settings, stripIndex) {
+export function renderSingleStrip(canvas, road, settings, stripIndex, range) {
   const ctx = canvas.getContext('2d')
-  const plan = computeStripPlan(road, settings)
+  const plan = computeStripPlan(road, settings, range)
   const pxPerMeter = plan.stripWidthPx / plan.stripSpanM
 
   canvas.width = plan.canvasWidth
@@ -82,8 +96,8 @@ export function renderSingleStrip(canvas, road, settings, stripIndex) {
   ctx.textBaseline = 'middle'
   ctx.font = '11px sans-serif'
 
-  const stripStartM = stripIndex * plan.stripSpanM
-  const stripEndM = Math.min((stripIndex + 1) * plan.stripSpanM, plan.totalLengthM)
+  const stripStartM = plan.baseM + stripIndex * plan.stripSpanM
+  const stripEndM = Math.min(plan.baseM + (stripIndex + 1) * plan.stripSpanM, plan.baseM + plan.totalLengthM)
 
   drawStrip(ctx, {
     x0: LEFT_MARGIN,
@@ -92,7 +106,7 @@ export function renderSingleStrip(canvas, road, settings, stripIndex) {
     stripEndM,
     pxPerMeter,
     stationIntervalM: settings.stationIntervalM,
-    segments: road.segments,
+    segments: plan.relevantSegments,
     globalMaxLanes: plan.globalMaxLanes,
     laneBandH: plan.laneBandH,
     hitRegions: [],
@@ -105,12 +119,15 @@ export function renderSingleStrip(canvas, road, settings, stripIndex) {
  *   surface_type, shoulder_left, shoulder_right}] } (segments must already be
  *   sorted by start_m, as returned by GET /api/roads/{road_id}).
  * `settings` = { stationIntervalM, stationsPerLine }.
+ * `range` (optional) = { startM, endM } to restrict the diagram to a station
+ *   sub-range of the road, clipping segments at the boundaries and starting
+ *   station labels from `startM` instead of 0.
  */
-export function renderDiagram(canvas, road, settings) {
+export function renderDiagram(canvas, road, settings, range) {
   const ctx = canvas.getContext('2d')
   const { stationIntervalM } = settings
-  const segments = road.segments
-  const plan = computeStripPlan(road, settings)
+  const plan = computeStripPlan(road, settings, range)
+  const segments = plan.relevantSegments
 
   if (plan.totalLengthM <= 0 || segments.length === 0) {
     canvas.width = 0
@@ -118,7 +135,7 @@ export function renderDiagram(canvas, road, settings) {
     return { hitRegions: [] }
   }
 
-  const { numStrips, globalMaxLanes, laneBandH, stripHeight, stripWidthPx, stripSpanM, canvasWidth } = plan
+  const { numStrips, globalMaxLanes, laneBandH, stripHeight, stripWidthPx, stripSpanM, canvasWidth, baseM } = plan
   const pxPerMeter = stripWidthPx / stripSpanM
 
   canvas.width = canvasWidth
@@ -134,8 +151,8 @@ export function renderDiagram(canvas, road, settings) {
   for (let s = 0; s < numStrips; s++) {
     // Anchor each strip's meter-grid to whole-pixel boundaries at the strip
     // start so station ticks land exactly on-pixel too, not just the fills.
-    const stripStartM = s * stripSpanM
-    const stripEndM = Math.min((s + 1) * stripSpanM, plan.totalLengthM)
+    const stripStartM = baseM + s * stripSpanM
+    const stripEndM = Math.min(baseM + (s + 1) * stripSpanM, baseM + plan.totalLengthM)
     const y0 = TOP_MARGIN + s * (stripHeight + STRIP_GAP)
 
     drawStrip(ctx, {

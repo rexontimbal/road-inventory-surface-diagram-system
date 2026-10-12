@@ -27,6 +27,8 @@ export default function RoadInventoryTable({
 }) {
   const records = segmentsPage?.records || []
   const hasActiveFilters = !!(filters.roadId || filters.status || filters.surfaceType)
+  const selectedRoad = roads.find((r) => r.road_id === filters.roadId)
+  const roadSelectTitle = selectedRoad ? `${selectedRoad.road_id} — ${selectedRoad.road_name}` : 'All roads'
 
   function updateFilter(key, value) {
     onFilterChange({ ...filters, [key]: value })
@@ -48,9 +50,13 @@ export default function RoadInventoryTable({
       </div>
 
       <div className="filter-bar">
-        <label className="filter-field">
+        <label className="filter-field filter-field-road">
           <span>Road</span>
-          <select value={filters.roadId} onChange={(e) => updateFilter('roadId', e.target.value)}>
+          <select
+            value={filters.roadId}
+            title={roadSelectTitle}
+            onChange={(e) => updateFilter('roadId', e.target.value)}
+          >
             <option value="">All roads</option>
             {roads.map((r) => (
               <option key={r.road_id} value={r.road_id}>
@@ -59,7 +65,7 @@ export default function RoadInventoryTable({
             ))}
           </select>
         </label>
-        <label className="filter-field">
+        <label className="filter-field filter-field-narrow">
           <span>Status</span>
           <select value={filters.status} onChange={(e) => updateFilter('status', e.target.value)}>
             <option value="">All statuses</option>
@@ -67,7 +73,7 @@ export default function RoadInventoryTable({
             <option value="Incomplete">Incomplete</option>
           </select>
         </label>
-        <label className="filter-field">
+        <label className="filter-field filter-field-surface">
           <span>Surface Type</span>
           <select value={filters.surfaceType} onChange={(e) => updateFilter('surfaceType', e.target.value)}>
             <option value="">All surface types</option>
@@ -79,20 +85,26 @@ export default function RoadInventoryTable({
           </select>
         </label>
         {hasActiveFilters && (
-          <button className="filter-clear" onClick={clearFilters}>
-            Clear filters
-          </button>
+          <div className="filter-action">
+            <span className="filter-label-spacer">&nbsp;</span>
+            <button className="filter-clear" onClick={clearFilters}>
+              Clear filters
+            </button>
+          </div>
         )}
-        <a
-          className="btn-compact export-csv-btn"
-          href={getSegmentsExportUrl(filters, sort)}
-          download
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M12 16V4m0 12-4-4m4 4 4-4M4 18v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          Export CSV
-        </a>
+        <div className="filter-action filter-action-right">
+          <span className="filter-label-spacer">&nbsp;</span>
+          <a
+            className="btn-compact export-csv-btn"
+            href={getSegmentsExportUrl(filters, sort)}
+            download
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 16V4m0 12-4-4m4 4 4-4M4 18v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Export CSV
+          </a>
+        </div>
       </div>
 
       <div className="table-scroll">

@@ -128,53 +128,87 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 0.78rem;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-secondary);
-  margin-bottom: 12px;
+  margin-bottom: 16px;
+  min-width: 0;
 }
 .panel select,
-.panel input[type='text'] {
-  height: 32px;
-  padding: 0 8px;
+.panel input[type='text'],
+.readonly-display {
+  box-sizing: border-box;
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: 8px;
   background: var(--surface);
   color: var(--text-primary);
-  font-size: 0.8rem;
-  line-height: 30px;
-  transition: border-color 0.15s ease;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .panel select:focus,
 .panel input[type='text']:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+.panel input[type='text'].field-invalid {
+  border-color: var(--critical);
+}
+.panel input[type='text'].field-invalid:focus {
+  box-shadow: 0 0 0 3px rgba(208, 59, 59, 0.15);
 }
 .readonly-display {
-  height: 32px;
   display: flex;
   align-items: center;
-  padding: 0 8px;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-sm);
+  border-style: dashed;
   background: var(--surface-sunken);
-  color: var(--text-primary);
-  font-size: 0.8rem;
-  box-sizing: border-box;
 }
 .readonly-placeholder {
   color: var(--text-muted);
   font-style: italic;
-  font-size: 0.78rem;
+  font-size: 13px;
 }
 
 .settings-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
+  margin-bottom: 16px;
 }
 .settings-row label {
-  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.range-helper-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin: -8px 0 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.range-reset-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.range-reset-link:hover {
+  background: none;
+  text-decoration: underline;
+}
+.range-error {
+  margin: -10px 0 16px;
+  font-size: 12px;
+  color: var(--critical);
 }
 
 button {
@@ -238,11 +272,13 @@ button:disabled {
 
 .primary-button {
   width: 100%;
+  height: 40px;
   background: var(--accent);
   color: #fff;
   border: 1px solid var(--accent);
+  border-radius: 8px;
   font-weight: 600;
-  padding: 11px;
+  padding: 0 11px;
   font-size: 0.85rem;
 }
 .primary-button:hover:not(:disabled) {
@@ -250,9 +286,8 @@ button:disabled {
   border-color: var(--accent-hover);
 }
 .primary-button:disabled {
-  background: var(--border-strong);
-  border-color: var(--border-strong);
-  color: var(--surface);
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .spinner {
@@ -448,51 +483,97 @@ button:disabled {
 .filter-bar {
   display: flex;
   align-items: flex-end;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
   padding-bottom: 10px;
   border-bottom: 1px solid var(--border);
 }
-.filter-field {
+/* Scoped as ".filter-bar .filter-field" (two classes) rather than bare
+   ".filter-field" (one class) so this reliably outranks the sidebar's global
+   ".panel label" rule (one class + one element) -- both match here because
+   RoadInventoryTable's wrapper also carries the "panel" class. Without this,
+   ".panel label"'s margin-bottom/font-size silently won on specificity,
+   which was the actual cause of the vertical misalignment. */
+.filter-bar .filter-field {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  font-size: 0.66rem;
-  font-weight: 600;
+  gap: 4px;
+  margin-bottom: 0;
+  font-size: 11px;
+  font-weight: 500;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
-.filter-field select {
-  padding: 4px 6px;
+.filter-bar .filter-field select {
+  box-sizing: border-box;
+  height: 32px;
+  padding: 4px 28px 4px 10px;
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: 6px;
   background: var(--surface);
   color: var(--text-primary);
-  font-size: 0.76rem;
+  font-size: 13px;
   font-weight: 400;
   text-transform: none;
-  width: 130px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
 }
-.filter-field select:focus {
+.filter-field-road select {
+  width: 200px;
+}
+.filter-field-narrow select {
+  width: 150px;
+}
+.filter-field-surface select {
+  width: 160px;
+}
+.filter-bar .filter-field select:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
-.filter-clear {
-  font-size: 0.78rem;
+
+/* Wraps Clear filters / Export CSV in the same label-spacer + 32px-control
+   shape as a .filter-field, so flex-end alignment lines their text up on the
+   same center line as the dropdown text, instead of bottom-aligning a short
+   label-less link against a taller labeled dropdown column. */
+.filter-bar .filter-action {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 0;
+}
+.filter-action-right {
+  margin-left: auto;
+}
+.filter-label-spacer {
+  font-size: 11px;
+  line-height: 1.2;
+  visibility: hidden;
+}
+.filter-bar .filter-clear {
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
+  padding: 0 4px;
+  font-size: 13px;
   color: var(--accent);
   background: none;
   border: none;
-  padding: 7px 4px;
 }
-.filter-clear:hover {
+.filter-bar .filter-clear:hover {
   text-decoration: underline;
   background: none;
 }
-.export-csv-btn {
-  margin-left: auto;
+.filter-bar .export-csv-btn {
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
   text-decoration: none;
 }
 .sortable-th {
@@ -849,4 +930,187 @@ tbody tr:last-child td {
     width: 100%;
     position: static;
   }
+}
+
+/* ===== Modal (replaces window.confirm / window.alert) ===== */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: modal-fade-in 150ms ease-out;
+}
+.modal-card {
+  width: 100%;
+  max-width: 420px;
+  margin: 16px;
+  background: var(--surface);
+  border-radius: 12px;
+  box-shadow: var(--shadow-md), 0 24px 48px rgba(0, 0, 0, 0.18);
+  padding: 24px;
+  animation: modal-scale-in 150ms ease-out;
+}
+@keyframes modal-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes modal-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.modal-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+.modal-icon-danger {
+  background: var(--critical-soft);
+  color: var(--critical);
+}
+.modal-icon-warning {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.modal-icon-info {
+  background: var(--info-soft);
+  color: var(--info);
+}
+.modal-icon-success {
+  background: var(--good-soft);
+  color: var(--good);
+}
+.modal-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.modal-message {
+  margin: 0 0 20px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.modal-message strong {
+  color: var(--text-primary);
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.modal-btn {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.modal-btn-cancel {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+}
+.modal-btn-cancel:hover {
+  background: var(--surface-sunken);
+}
+.modal-btn-confirm {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #fff;
+}
+.modal-btn-confirm:hover {
+  background: var(--accent-hover);
+}
+.modal-btn-danger {
+  background: var(--critical);
+  border: 1px solid var(--critical);
+  color: #fff;
+}
+.modal-btn-danger:hover {
+  background: #b32e2e;
+}
+
+/* ===== Toast stack ===== */
+.toast-stack {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 340px;
+}
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-md);
+  font-size: 13px;
+  animation: modal-scale-in 150ms ease-out;
+}
+.toast-icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+}
+.toast-success .toast-icon {
+  background: var(--good);
+}
+.toast-danger .toast-icon {
+  background: var(--critical);
+}
+.toast-warning .toast-icon {
+  background: var(--warning);
+}
+.toast-info .toast-icon {
+  background: var(--info);
+}
+.toast-message {
+  flex: 1;
+  color: var(--text-primary);
+  padding-top: 1px;
+}
+.toast-close {
+  background: none;
+  border: none;
+  padding: 0;
+  height: auto;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+}
+.toast-close:hover {
+  background: none;
+  color: var(--text-primary);
 }

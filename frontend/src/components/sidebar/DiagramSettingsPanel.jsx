@@ -1,3 +1,5 @@
+import { formatStation, parseStationInput } from '../../utils/chainage'
+
 const INTERVAL_OPTIONS = [
   { label: '500 meters', value: 500 },
   { label: '1 kilometer', value: 1000 },
@@ -6,7 +8,44 @@ const INTERVAL_OPTIONS = [
 
 const STATIONS_PER_LINE_OPTIONS = [5, 10, 15, 20]
 
-export default function DiagramSettingsPanel({ settings, onChange, onGenerate, canGenerate, onExpand }) {
+export default function DiagramSettingsPanel({
+  road,
+  range,
+  onRangeChange,
+  settings,
+  onChange,
+  onGenerate,
+  canGenerate,
+  onExpand,
+}) {
+  const hasRoad = !!(road && road.segments.length)
+  const roadMinM = hasRoad ? road.segments[0].start_m : null
+  const roadMaxM = hasRoad ? road.segments[road.segments.length - 1].end_m : null
+
+  const startM = parseStationInput(range.startRaw)
+  const endM = parseStationInput(range.endRaw)
+
+  let rangeError = ''
+  if (hasRoad) {
+    if (range.startRaw.trim() && startM === null) {
+      rangeError = 'Use format like 12+500'
+    } else if (range.endRaw.trim() && endM === null) {
+      rangeError = 'Use format like 12+500'
+    } else if (startM !== null && endM !== null && startM >= endM) {
+      rangeError = 'Start must be before End'
+    } else if (startM !== null && (startM < roadMinM || startM > roadMaxM)) {
+      rangeError = `Start must be within road range (${formatStation(roadMinM)} – ${formatStation(roadMaxM)})`
+    } else if (endM !== null && (endM < roadMinM || endM > roadMaxM)) {
+      rangeError = `End must be within road range (${formatStation(roadMinM)} – ${formatStation(roadMaxM)})`
+    }
+  }
+
+  const rangeValid = hasRoad && startM !== null && endM !== null && !rangeError
+
+  function handleReset() {
+    onRangeChange({ startRaw: formatStation(roadMinM), endRaw: formatStation(roadMaxM) })
+  }
+
   return (
     <div className="panel">
       <button type="button" className="panel-icon" title="Diagram Settings" onClick={onExpand}>
@@ -19,6 +58,43 @@ export default function DiagramSettingsPanel({ settings, onChange, onGenerate, c
       </button>
       <div className="panel-body">
       <h2>3. Diagram Settings</h2>
+
+      <div className="settings-row">
+        <label>
+          Start Station
+          <input
+            type="text"
+            className={rangeError ? 'field-invalid' : ''}
+            value={range.startRaw}
+            disabled={!hasRoad}
+            placeholder="0+000"
+            onChange={(e) => onRangeChange({ ...range, startRaw: e.target.value })}
+          />
+        </label>
+        <label>
+          End Station
+          <input
+            type="text"
+            className={rangeError ? 'field-invalid' : ''}
+            value={range.endRaw}
+            disabled={!hasRoad}
+            placeholder="35+000"
+            onChange={(e) => onRangeChange({ ...range, endRaw: e.target.value })}
+          />
+        </label>
+      </div>
+      {hasRoad && (
+        <div className="range-helper-row">
+          <span className="range-helper-text">
+            Road range: {formatStation(roadMinM)} &ndash; {formatStation(roadMaxM)}
+          </span>
+          <button type="button" className="range-reset-link" onClick={handleReset}>
+            Reset to full road
+          </button>
+        </div>
+      )}
+      {rangeError && <p className="range-error">{rangeError}</p>}
+
       <div className="settings-row">
         <label>
           Station Interval
@@ -47,7 +123,7 @@ export default function DiagramSettingsPanel({ settings, onChange, onGenerate, c
           </select>
         </label>
       </div>
-      <button className="primary-button" onClick={onGenerate} disabled={!canGenerate}>
+      <button className="primary-button" onClick={onGenerate} disabled={!canGenerate || !rangeValid}>
         Generate Road Surface Diagram
       </button>
       </div>
