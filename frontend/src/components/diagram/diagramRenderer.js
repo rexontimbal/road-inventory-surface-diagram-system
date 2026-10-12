@@ -7,6 +7,10 @@ const BASE_STRIP_WIDTH_PX = 1200
 // Stations-per-Line settings. The strip grows wider (and the canvas scrolls)
 // rather than letting labels collide.
 const MIN_PX_PER_INTERVAL = 90
+// Minimum gap enforced between two adjacent station labels; if the next
+// label would start closer than this to the previous one's right edge, it
+// is skipped (the tick mark still draws) rather than letting text overlap.
+const LABEL_MIN_GAP_PX = 6
 const LEFT_MARGIN = 90
 const RIGHT_MARGIN = 20
 const TOP_MARGIN = 10
@@ -202,18 +206,32 @@ function drawStrip(ctx, cfg) {
 
   // Station header ticks/labels -- meters converted to px from the same
   // stripStartM origin used for the segment fills, so ticks and fills never drift apart.
+  // The tick mark is always drawn; the text label is only drawn when it fits
+  // without touching the previously-drawn label, so labels never overlap
+  // regardless of interval/range/font-metric combination.
   ctx.strokeStyle = BORDER_COLOR
   ctx.fillStyle = '#000000'
+  let lastLabelRight = -Infinity
   for (let m = stripStartM; m <= stripEndM; m += stationIntervalM) {
     const x = px(x0 + (m - stripStartM) * pxPerMeter)
     ctx.beginPath()
     ctx.moveTo(x, y0 + HEADER_H - 6)
     ctx.lineTo(x, y0 + HEADER_H)
     ctx.stroke()
-    ctx.save()
-    ctx.textAlign = m === stripStartM ? 'left' : 'center'
-    ctx.fillText(formatStationLabel(m), x, y0 + HEADER_H / 2)
-    ctx.restore()
+
+    const isFirst = m === stripStartM
+    const label = formatStationLabel(m)
+    const textWidth = ctx.measureText(label).width
+    const labelLeft = isFirst ? x : x - textWidth / 2
+    const labelRight = isFirst ? x + textWidth : x + textWidth / 2
+
+    if (isFirst || labelLeft >= lastLabelRight + LABEL_MIN_GAP_PX) {
+      ctx.save()
+      ctx.textAlign = isFirst ? 'left' : 'center'
+      ctx.fillText(label, x, y0 + HEADER_H / 2)
+      ctx.restore()
+      lastLabelRight = labelRight
+    }
   }
 
   // Clip segments into this strip and draw each clipped column

@@ -107,7 +107,7 @@ export default function RoadInventoryTable({
         </div>
       </div>
 
-      <div className="table-scroll">
+      <div className="table-scroll thin-scroll">
         <table>
           <thead>
             <tr>
@@ -147,7 +147,14 @@ export default function RoadInventoryTable({
                 <td>{r.shoulder_left}</td>
                 <td>{r.shoulder_right}</td>
                 <td>
-                  <span className={`status-badge ${r.status === 'Complete' ? 'status-badge-good' : 'status-badge-critical'}`}>
+                  <span
+                    className={`status-badge ${r.status === 'Complete' ? 'status-badge-good' : 'status-badge-critical'}`}
+                    title={
+                      r.status === 'Complete'
+                        ? 'Complete = asphalt surface'
+                        : `Incomplete = not yet asphalt (surface is "${r.surface_type}")`
+                    }
+                  >
                     <span aria-hidden="true">{r.status === 'Complete' ? '✓' : '✕'}</span>
                     {r.status}
                   </span>

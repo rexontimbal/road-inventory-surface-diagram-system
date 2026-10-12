@@ -14,7 +14,7 @@ export default function NetworkSummaryBar({ summary }) {
           {(summary.total_length_m / 1000).toFixed(1)} km)
         </span>
       </div>
-      <div className="road-chip-row">
+      <div className="road-chip-row thin-scroll">
         {sortedRoads.map((r) => (
           <span
             key={r.road_id}

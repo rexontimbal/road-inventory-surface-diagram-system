@@ -2,6 +2,33 @@
   min-height: 100vh;
 }
 
+/* Reusable thin, blue-tinted scrollbar for scrollable panels throughout
+   the app (upload summary, inventory table, diagram wrap, chip rows). */
+.thin-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(37, 99, 235, 0.45) transparent;
+}
+.thin-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.thin-scroll::-webkit-scrollbar-track {
+  background: #eef2f7;
+  border-radius: 999px;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: rgba(37, 99, 235, 0.45);
+  border-radius: 999px;
+}
+.thin-scroll::-webkit-scrollbar-thumb:hover {
+  background: #2563eb;
+}
+.thin-scroll::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 .app-header {
   background: var(--header-bg);
   color: var(--header-text);
@@ -330,41 +357,56 @@ button:disabled {
   margin-bottom: 2px;
 }
 
-/* Collapsed upload-result summary (auto-minimizes after a few seconds so a
-   large multi-road upload doesn't permanently stretch the sidebar) */
-.upload-result-collapsed {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  width: 100%;
+/* Unified upload-summary card: collapsed and expanded share the same
+   outer card (border/background/radius/padding); only content height
+   changes, so "View details"/"Minimize" never float outside the card. */
+.upload-summary-card {
   margin-top: 12px;
-  padding: 8px 10px;
+  padding: 10px 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface-sunken);
-  font-size: 0.76rem;
-  text-align: left;
 }
-.upload-result-collapsed:hover {
-  background: var(--border);
+.upload-summary-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-.collapsed-chip {
+.upload-summary-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.upload-summary-icon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--surface);
+}
+.upload-summary-icon-good {
+  background: var(--good);
+}
+.upload-summary-icon-critical {
+  background: var(--critical);
+}
+.upload-summary-title {
+  font-size: 0.78rem;
   font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.collapsed-chip-good {
-  color: var(--good);
-}
-.collapsed-chip-critical {
-  color: var(--critical);
-}
-.collapsed-expand-hint {
-  margin-left: auto;
-  color: var(--accent);
-}
-.minimize-result-btn {
-  display: block;
+.upload-summary-toggle {
+  flex-shrink: 0;
   margin-left: auto;
   background: none;
   border: none;
@@ -372,9 +414,88 @@ button:disabled {
   color: var(--accent);
   font-size: 0.72rem;
 }
-.minimize-result-btn:hover {
+.upload-summary-toggle:hover {
   background: none;
   text-decoration: underline;
+}
+.upload-summary-body {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 200ms ease, opacity 200ms ease;
+}
+.upload-summary-body-open {
+  max-height: 260px;
+  opacity: 1;
+}
+.upload-summary-body-inner {
+  max-height: 220px;
+  overflow-y: auto;
+  padding-top: 10px;
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.upload-summary-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.upload-summary-row {
+  padding: 7px 0;
+  border-top: 1px solid var(--border);
+}
+.upload-summary-row:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+.upload-summary-row-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.78rem;
+}
+.upload-summary-count {
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.upload-summary-road-name {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  margin-top: 1px;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+.upload-summary-progress-track {
+  margin-top: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--border);
+  overflow: hidden;
+}
+.upload-summary-progress-bar {
+  height: 100%;
+  width: 100%;
+  background: var(--accent);
+  transform-origin: left;
+  animation-name: upload-summary-shrink;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+.upload-summary-card:hover .upload-summary-progress-bar,
+.upload-summary-card:focus-within .upload-summary-progress-bar {
+  animation-play-state: paused;
+}
+@keyframes upload-summary-shrink {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
 }
 
 /* Feedback cards (upload results) */
@@ -408,8 +529,13 @@ button:disabled {
   justify-content: center;
   font-size: 0.7rem;
   font-weight: 700;
-  background: currentColor;
   color: var(--surface);
+}
+.feedback-good .feedback-icon {
+  background: var(--good);
+}
+.feedback-critical .feedback-icon {
+  background: var(--critical);
 }
 .feedback-body {
   min-width: 0;
@@ -424,41 +550,6 @@ button:disabled {
 .feedback-card p {
   margin: 0;
   color: var(--text-secondary);
-}
-.feedback-list {
-  list-style: none;
-  margin: 8px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.feedback-list-item {
-  padding-top: 6px;
-  border-top: 1px solid var(--good-border);
-}
-.feedback-list-item:first-child {
-  padding-top: 0;
-  border-top: none;
-}
-.feedback-list-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
-  font-size: 0.78rem;
-}
-.feedback-road-name {
-  color: var(--text-secondary);
-  font-size: 0.76rem;
-  margin-top: 1px;
-  white-space: normal;
-  overflow-wrap: break-word;
-}
-.feedback-count {
-  color: var(--text-muted);
-  white-space: nowrap;
-  flex-shrink: 0;
 }
 .mono {
   font-family: 'SF Mono', 'Cascadia Code', Consolas, monospace;
@@ -803,6 +894,80 @@ tbody tr:last-child td {
   font-size: 0.85rem;
   text-align: center;
   padding: 30px;
+}
+
+.diagram-empty-guide {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 220px;
+  padding: 30px;
+}
+.guide-steps-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  flex-wrap: nowrap;
+}
+.guide-step-wrap {
+  display: flex;
+  align-items: flex-start;
+}
+.guide-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 110px;
+  flex-shrink: 0;
+}
+.guide-step-icon {
+  box-sizing: border-box;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.guide-step-done .guide-step-icon {
+  background: var(--good);
+  color: #fff;
+}
+.guide-step-pending .guide-step-icon {
+  background: var(--surface);
+  border: 2px solid var(--border-strong);
+  color: var(--text-muted);
+}
+.guide-step-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-align: center;
+  white-space: nowrap;
+}
+.guide-step-done .guide-step-label {
+  color: var(--good);
+}
+.guide-connector {
+  width: 64px;
+  height: 2px;
+  flex-shrink: 0;
+  background: var(--border-strong);
+  margin-top: 17px;
+}
+.guide-connector-done {
+  background: var(--good);
+}
+.guide-hint {
+  margin: 16px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
 }
 #diagram-canvas {
   display: block;

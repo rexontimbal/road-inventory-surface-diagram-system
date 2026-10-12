@@ -61,7 +61,14 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tablePage, tableFilters, tableSort])
 
-  function handleFilterChange(newFilters) {
+  async function handleFilterChange(newFilters) {
+    // The ROAD filter and "2. Select Road" are kept in sync both ways: if
+    // this change came from the table's Road dropdown (or Clear filters),
+    // drive the same selection logic Select Road uses so the road detail,
+    // station range, and diagram state all stay consistent.
+    if (newFilters.roadId !== tableFilters.roadId) {
+      await handleSelectRoad(newFilters.roadId)
+    }
     setTableFilters(newFilters)
     setTablePage(1)
   }
@@ -87,6 +94,10 @@ export default function App() {
     setSelectedRoadId(roadId)
     setHasGenerated(false)
     setGeneratedRange(null)
+    // Keep the table's ROAD filter in sync when the road is picked from
+    // "2. Select Road" rather than from the table filter itself.
+    setTableFilters((f) => (f.roadId === roadId ? f : { ...f, roadId }))
+    setTablePage(1)
     if (!roadId) {
       setRoadDetail(null)
       setRange({ startRaw: '', endRaw: '' })
@@ -189,6 +200,7 @@ export default function App() {
             road={roadDetail ? { roadDetail, settings, range: generatedRange } : null}
             diagramVersion={diagramVersion}
             hasGenerated={hasGenerated}
+            hasRoads={roads.length > 0}
           />
         </main>
       </div>

@@ -27,7 +27,7 @@ function computeCompletion(roadDetail, range) {
   return { pct, doneM, totalM }
 }
 
-export default function DiagramPanel({ road, diagramVersion, hasGenerated }) {
+export default function DiagramPanel({ road, diagramVersion, hasGenerated, hasRoads }) {
   const canvasRef = useRef(null)
   const hitRegionsRef = useRef([])
   const printCanvasRefs = useRef([])
@@ -138,11 +138,36 @@ export default function DiagramPanel({ road, diagramVersion, hasGenerated }) {
         </div>
       )}
 
-      <div className="diagram-canvas-wrap">
+      <div className="diagram-canvas-wrap thin-scroll">
         {!hasGenerated && (
-          <p className="placeholder">
-            Upload an Excel file, select a road, and click Generate Road Surface Diagram.
-          </p>
+          <div className="diagram-empty-guide">
+            <div className="guide-steps-row">
+              {[
+                { n: 1, label: 'Upload Excel', done: hasRoads },
+                { n: 2, label: 'Select road', done: !!road },
+                { n: 3, label: 'Generate diagram', done: false },
+              ].map((step, i, arr) => (
+                <div className="guide-step-wrap" key={step.n}>
+                  <div
+                    className={`guide-step ${step.done ? 'guide-step-done' : 'guide-step-pending'}`}
+                  >
+                    <span className="guide-step-icon">{step.done ? '✓' : step.n}</span>
+                    <span className="guide-step-label">{step.label}</span>
+                  </div>
+                  {i < arr.length - 1 && (
+                    <span className={`guide-connector ${step.done ? 'guide-connector-done' : ''}`} />
+                  )}
+                </div>
+              ))}
+            </div>
+            <p className="guide-hint">
+              {!hasRoads
+                ? 'Upload an Excel file to get started.'
+                : !road
+                ? 'Select a road from the sidebar.'
+                : 'Click Generate Road Surface Diagram.'}
+            </p>
+          </div>
         )}
         {hasGenerated && (
           <canvas

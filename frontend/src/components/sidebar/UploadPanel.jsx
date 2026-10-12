@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { uploadExcel } from '../../api/roads'
 
-const AUTO_COLLAPSE_MS = 3000
+const AUTO_MINIMIZE_AFTER_UPLOAD_MS = 3000
+const AUTO_MINIMIZE_AFTER_VIEW_MS = 5000
 
 const REQUIRED_COLUMNS = [
   'ROAD ID',
@@ -21,13 +22,52 @@ export default function UploadPanel({ onUploaded, onExpand }) {
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
   const [resultExpanded, setResultExpanded] = useState(true)
+  const [progressKey, setProgressKey] = useState(0)
+
+  const timerRef = useRef(null)
+  const durationRef = useRef(AUTO_MINIMIZE_AFTER_UPLOAD_MS)
+
+  function clearAutoMinimizeTimer() {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }
+
+  function startAutoMinimizeTimer(duration) {
+    clearAutoMinimizeTimer() // never stack two timers
+    durationRef.current = duration
+    setProgressKey((k) => k + 1) // restarts the CSS progress-bar animation
+    timerRef.current = setTimeout(() => setResultExpanded(false), duration)
+  }
 
   useEffect(() => {
     if (!result) return
     setResultExpanded(true)
-    const timer = setTimeout(() => setResultExpanded(false), AUTO_COLLAPSE_MS)
-    return () => clearTimeout(timer)
+    startAutoMinimizeTimer(AUTO_MINIMIZE_AFTER_UPLOAD_MS)
+    return clearAutoMinimizeTimer
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result])
+
+  useEffect(() => clearAutoMinimizeTimer, [])
+
+  function handleViewDetails() {
+    setResultExpanded(true)
+    startAutoMinimizeTimer(AUTO_MINIMIZE_AFTER_VIEW_MS)
+  }
+
+  function handleMinimize() {
+    clearAutoMinimizeTimer()
+    setResultExpanded(false)
+  }
+
+  function handlePause() {
+    clearAutoMinimizeTimer()
+  }
+
+  function handleResume() {
+    if (resultExpanded) startAutoMinimizeTimer(durationRef.current)
+  }
 
   async function handleFileChange(e) {
     const file = e.target.files?.[0]
@@ -45,6 +85,18 @@ export default function UploadPanel({ onUploaded, onExpand }) {
     } finally {
       setUploading(false)
     }
+  }
+
+  const importedCount = result?.imported.length || 0
+  const rejectedCount = result?.rejected.length || 0
+  const headerIsError = importedCount === 0 && rejectedCount > 0
+  let headerText = ''
+  if (importedCount > 0 && rejectedCount > 0) {
+    headerText = `${importedCount} road${importedCount !== 1 ? 's' : ''} uploaded · ${rejectedCount} rejected`
+  } else if (importedCount > 0) {
+    headerText = `${importedCount} road${importedCount !== 1 ? 's' : ''} uploaded`
+  } else if (rejectedCount > 0) {
+    headerText = `${rejectedCount} road${rejectedCount !== 1 ? 's' : ''} rejected`
   }
 
   return (
@@ -89,69 +141,84 @@ export default function UploadPanel({ onUploaded, onExpand }) {
         </div>
       )}
 
-      {result && !resultExpanded && (
-        <button
-          type="button"
-          className="upload-result-collapsed"
-          onClick={() => setResultExpanded(true)}
+      {result && (
+        <div
+          className="upload-summary-card"
+          onMouseEnter={handlePause}
+          onMouseLeave={handleResume}
+          onFocus={handlePause}
+          onBlur={handleResume}
         >
-          {result.imported.length > 0 && (
-            <span className="collapsed-chip collapsed-chip-good">
-              ✓ {result.imported.length} uploaded
-            </span>
-          )}
-          {result.rejected.length > 0 && (
-            <span className="collapsed-chip collapsed-chip-critical">
-              ✕ {result.rejected.length} rejected
-            </span>
-          )}
-          <span className="collapsed-expand-hint">View details</span>
-        </button>
-      )}
+          <div className="upload-summary-header">
+            <div className="upload-summary-header-left">
+              <span
+                className={`upload-summary-icon ${headerIsError ? 'upload-summary-icon-critical' : 'upload-summary-icon-good'}`}
+                aria-hidden="true"
+              >
+                {headerIsError ? '✕' : '✓'}
+              </span>
+              <span className="upload-summary-title">{headerText}</span>
+            </div>
+            <button
+              type="button"
+              className="upload-summary-toggle"
+              onClick={resultExpanded ? handleMinimize : handleViewDetails}
+            >
+              {resultExpanded ? 'Minimize ▴' : 'View details ▾'}
+            </button>
+          </div>
 
-      {result && resultExpanded && (
-        <div className="upload-result">
-          <button type="button" className="minimize-result-btn" onClick={() => setResultExpanded(false)}>
-            ▾ Minimize
-          </button>
-          {result.imported.length > 0 && (
-            <div className="feedback-card feedback-good">
-              <span className="feedback-icon" aria-hidden="true">✓</span>
-              <div className="feedback-body">
-                <strong>{result.imported.length} road{result.imported.length !== 1 ? 's' : ''} uploaded successfully</strong>
-                <ul className="feedback-list">
+          <div className={`upload-summary-body${resultExpanded ? ' upload-summary-body-open' : ''}`}>
+            <div className="upload-summary-body-inner thin-scroll">
+              {importedCount > 0 && (
+                <ul className="upload-summary-list">
                   {result.imported.map((r) => (
-                    <li key={r.road_id} className="feedback-list-item">
-                      <div className="feedback-list-row">
+                    <li key={r.road_id} className="upload-summary-row">
+                      <div className="upload-summary-row-top">
                         <span className="mono">{r.road_id}</span>
-                        <span className="feedback-count">{r.segment_count} segment{r.segment_count !== 1 ? 's' : ''}</span>
+                        <span className="upload-summary-count">
+                          {r.segment_count} segment{r.segment_count !== 1 ? 's' : ''}
+                        </span>
                       </div>
-                      <div className="feedback-road-name">{r.road_name}</div>
+                      <div className="upload-summary-road-name">{r.road_name}</div>
                     </li>
                   ))}
                 </ul>
-              </div>
-            </div>
-          )}
+              )}
 
-          {result.rejected.length > 0 && (
-            <div className="feedback-card feedback-critical">
-              <span className="feedback-icon" aria-hidden="true">✕</span>
-              <div className="feedback-body">
-                <strong>{result.rejected.length} road{result.rejected.length !== 1 ? 's' : ''} rejected — not uploaded</strong>
-                {result.rejected.map((r) => (
-                  <details key={r.road_id} className="rejected-detail">
-                    <summary>
-                      <span className="mono">{r.road_id}</span> — {r.errors.length} error{r.errors.length !== 1 ? 's' : ''}
-                    </summary>
-                    <ul>
-                      {r.errors.map((e, i) => (
-                        <li key={i}>Row {e.row} ({e.field}): {e.message}</li>
-                      ))}
-                    </ul>
-                  </details>
-                ))}
-              </div>
+              {rejectedCount > 0 && (
+                <div
+                  className="feedback-card feedback-critical"
+                  style={importedCount > 0 ? { marginTop: 12 } : undefined}
+                >
+                  <span className="feedback-icon" aria-hidden="true">✕</span>
+                  <div className="feedback-body">
+                    <strong>{rejectedCount} road{rejectedCount !== 1 ? 's' : ''} rejected — not uploaded</strong>
+                    {result.rejected.map((r) => (
+                      <details key={r.road_id} className="rejected-detail">
+                        <summary>
+                          <span className="mono">{r.road_id}</span> — {r.errors.length} error{r.errors.length !== 1 ? 's' : ''}
+                        </summary>
+                        <ul>
+                          {r.errors.map((e, i) => (
+                            <li key={i}>Row {e.row} ({e.field}): {e.message}</li>
+                          ))}
+                        </ul>
+                      </details>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {resultExpanded && (
+            <div className="upload-summary-progress-track">
+              <div
+                key={progressKey}
+                className="upload-summary-progress-bar"
+                style={{ animationDuration: `${durationRef.current}ms` }}
+              />
             </div>
           )}
         </div>
