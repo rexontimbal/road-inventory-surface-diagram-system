@@ -57,6 +57,12 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    document.title = selectedRoadId
+      ? `${selectedRoadId} · Road Inventory & Surface Diagram`
+      : 'Road Inventory & Surface Diagram System'
+  }, [selectedRoadId])
+
+  useEffect(() => {
     refreshSegmentsPage(tablePage, tableFilters, tableSort)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tablePage, tableFilters, tableSort])
