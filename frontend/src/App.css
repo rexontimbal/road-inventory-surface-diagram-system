@@ -368,7 +368,16 @@
   margin: 0;
 }
 
-.panel label {
+/* Scoped to ".sidebar .panel" (not bare ".panel", which is also used by the
+   inventory table/diagram/network-summary content panels AND -- since
+   UploadConflictModal/UploadHistoryModal used to render inline, nested
+   inside UploadPanel's own .panel div -- briefly leaked into those modals
+   too and squashed their toolbar into one column. Both modals are now
+   portaled to document.body so they're structurally outside .panel
+   entirely, but keeping this scoped to .sidebar is the correct fix at the
+   source: anything rendered inside a .panel outside the sidebar must never
+   pick up sidebar-only field sizing. */
+.sidebar .panel label {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -378,9 +387,9 @@
   margin-bottom: 12px;
   min-width: 0;
 }
-.panel select,
-.panel input[type='text'],
-.readonly-display {
+.sidebar .panel select,
+.sidebar .panel input[type='text'],
+.sidebar .readonly-display {
   box-sizing: border-box;
   width: 100%;
   height: 32px;
@@ -393,23 +402,23 @@
   font-variant-numeric: tabular-nums;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-.panel select:focus,
-.panel input[type='text']:focus {
+.sidebar .panel select:focus,
+.sidebar .panel input[type='text']:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
 /* Sidebar dropdowns match "4. Road Inventory Data" filter dropdowns exactly
    (same 32px/13px/6px-radius sizing) -- same rule shape as
-   .filter-bar .filter-field .custom-select-sm, just scoped to .panel. */
-.panel .custom-select-sm {
+   .filter-bar .filter-field .custom-select-sm, just scoped to the sidebar. */
+.sidebar .panel .custom-select-sm {
   width: 100%;
   height: 32px;
   padding: 4px 28px 4px 10px;
   border-radius: 6px;
   font-size: 13px;
 }
-.panel input[type='text'].field-invalid {
+.sidebar .panel input[type='text'].field-invalid {
   border-color: var(--critical);
 }
 .panel input[type='text'].field-invalid:focus {
@@ -2008,6 +2017,7 @@ tbody tr:last-child td {
   display: flex;
   flex-direction: column;
   max-height: 88vh;
+  padding: 20px;
 }
 .history-modal-subtitle {
   margin: 0 0 16px;
@@ -2035,16 +2045,29 @@ tbody tr:last-child td {
 
 .history-toolbar {
   display: flex;
+  align-items: center;
   gap: 8px;
   margin-bottom: 12px;
   flex-wrap: wrap;
 }
+.history-search-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 200px;
+}
+.history-search-icon {
+  position: absolute;
+  top: 50%;
+  left: 9px;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+}
 .history-search {
   box-sizing: border-box;
-  flex: 1;
-  min-width: 180px;
+  width: 100%;
   height: 32px;
-  padding: 0 10px;
+  padding: 0 10px 0 28px;
   border: 1px solid var(--border-strong);
   border-radius: 6px;
   font-size: 13px;
@@ -2055,6 +2078,14 @@ tbody tr:last-child td {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+.history-action-select {
+  width: 170px;
+  flex-shrink: 0;
+}
+.history-date-select {
+  width: 150px;
+  flex-shrink: 0;
 }
 
 .history-table-wrap {
@@ -2174,6 +2205,12 @@ tbody tr:last-child td {
   font-size: 12.5px;
   color: var(--text-muted);
 }
+.history-cancelled-note {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  font-style: italic;
+  color: var(--text-muted);
+}
 .history-detail-row {
   display: flex;
   align-items: baseline;
@@ -2218,6 +2255,16 @@ tbody tr:last-child td {
   display: flex;
   align-items: center;
   gap: 14px;
+  font-size: 13px;
+}
+.history-export-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  text-decoration: none;
+}
+.history-export-link:hover {
+  text-decoration: underline;
 }
 .history-clear-link {
   color: #dc2626;
@@ -2234,14 +2281,9 @@ tbody tr:last-child td {
   font-size: 0.75rem;
   color: var(--text-muted);
 }
-.pagination-size select {
-  height: 26px;
-  padding: 0 6px;
-  border: 1px solid var(--border-strong);
-  border-radius: 6px;
-  font-size: 0.75rem;
-  background: var(--surface);
-  color: var(--text-primary);
+.pagination-size-select {
+  width: 70px;
+  flex-shrink: 0;
 }
 
 /* ===== Toast stack ===== */

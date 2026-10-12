@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import CustomSelect from '../common/CustomSelect'
 import Pagination from '../inventory/Pagination'
 import { clearUploadLog, fetchUploadLog, getUploadLogExportUrl } from '../../api/roads'
@@ -59,6 +60,18 @@ function summaryBadges(entry) {
   if (entry.rejected_count > 0) badges.push({ key: 'rejected', label: `${entry.rejected_count} rejected` })
   if (entry.deleted_count > 0) badges.push({ key: 'deleted', label: `${entry.deleted_count} deleted` })
   return badges
+}
+
+// A cancelled upload never touched the database -- the counts above are
+// only what WOULD have happened, so the collapsed row must not read like
+// they actually did. The real counts still show inside the expanded detail,
+// just worded as "would have been".
+function wouldHaveSentence(entry) {
+  const parts = []
+  if (entry.added_count > 0) parts.push(`${entry.added_count} road${entry.added_count !== 1 ? 's' : ''} would have been added`)
+  if (entry.replaced_count > 0) parts.push(`${entry.replaced_count} would have been replaced`)
+  if (entry.rejected_count > 0) parts.push(`${entry.rejected_count} would have been rejected`)
+  return parts.length > 0 ? `${parts.join(', ')}.` : null
 }
 
 export default function UploadHistoryModal({ onClose, triggerRef }) {
@@ -179,7 +192,7 @@ export default function UploadHistoryModal({ onClose, triggerRef }) {
 
   const exportUrl = getUploadLogExportUrl({ search, action, dateRange })
 
-  return (
+  return createPortal(
     <div
       className="modal-backdrop no-print"
       onMouseDown={(e) => {
@@ -223,13 +236,19 @@ export default function UploadHistoryModal({ onClose, triggerRef }) {
         <p className="history-modal-subtitle">All uploads and changes to road data</p>
 
         <div className="history-toolbar">
-          <input
-            type="text"
-            className="history-search"
-            placeholder="Search file name or Road ID…"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-          />
+          <div className="history-search-wrap">
+            <svg className="history-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.8" />
+              <path d="m20 20-3.5-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
+            <input
+              type="text"
+              className="history-search"
+              placeholder="Search file name or Road ID…"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+            />
+          </div>
           <CustomSelect
             size="sm"
             value={action}
@@ -239,6 +258,7 @@ export default function UploadHistoryModal({ onClose, triggerRef }) {
             }}
             options={ACTION_OPTIONS}
             ariaLabel="Filter by action"
+            triggerClassName="history-action-select"
           />
           <CustomSelect
             size="sm"
@@ -249,6 +269,7 @@ export default function UploadHistoryModal({ onClose, triggerRef }) {
             }}
             options={DATE_OPTIONS}
             ariaLabel="Filter by date"
+            triggerClassName="history-date-select"
           />
         </div>
 
@@ -302,11 +323,15 @@ export default function UploadHistoryModal({ onClose, triggerRef }) {
                         </td>
                         <td>
                           <div className="history-badge-row">
-                            {summaryBadges(entry).map((b) => (
-                              <span key={b.key} className={`upload-summary-badge upload-summary-badge-${ACTION_BADGE_CLASS[b.key]}`}>
-                                {b.label}
-                              </span>
-                            ))}
+                            {entry.status === 'cancelled' ? (
+                              <span className="upload-summary-badge upload-summary-badge-skipped">No changes applied</span>
+                            ) : (
+                              summaryBadges(entry).map((b) => (
+                                <span key={b.key} className={`upload-summary-badge upload-summary-badge-${ACTION_BADGE_CLASS[b.key]}`}>
+                                  {b.label}
+                                </span>
+                              ))
+                            )}
                           </div>
                         </td>
                         <td>
@@ -323,6 +348,12 @@ export default function UploadHistoryModal({ onClose, triggerRef }) {
                           <td colSpan={5}>
                             <div className="history-expand-body">
                               {entry.error_message && <p className="history-error-message">{entry.error_message}</p>}
+                              {entry.status === 'cancelled' && (
+                                <p className="history-cancelled-note">
+                                  Cancelled before saving — nothing was changed.
+                                  {wouldHaveSentence(entry) && ` ${wouldHaveSentence(entry)}`}
+                                </p>
+                              )}
                               {entry.details.length === 0 && !entry.error_message && (
                                 <p className="history-no-detail">No road changes recorded for this entry.</p>
                               )}
@@ -377,7 +408,10 @@ export default function UploadHistoryModal({ onClose, triggerRef }) {
 
         <div className="history-footer">
           <div className="history-footer-left">
-            <a className="btn-link" href={exportUrl} download>
+            <a className="btn-link history-export-link" href={exportUrl} download>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 16V4m0 12-4-4m4 4 4-4M4 18v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
               Export logs (CSV)
             </a>
             <button type="button" className="btn-link history-clear-link" onClick={handleClearHistory}>
@@ -389,6 +423,7 @@ export default function UploadHistoryModal({ onClose, triggerRef }) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

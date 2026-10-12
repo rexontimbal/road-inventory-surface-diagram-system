@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 function formatDate(iso) {
   if (!iso) return 'unknown date'
@@ -47,7 +48,7 @@ export default function UploadConflictModal({ duplicates, newCount, sourceFile, 
   const title =
     duplicates.length === 1 ? 'Road ID already exists' : `${duplicates.length} Road IDs already exist`
 
-  return (
+  return createPortal(
     <div
       className="modal-backdrop no-print"
       onMouseDown={(e) => {
@@ -156,6 +157,7 @@ export default function UploadConflictModal({ duplicates, newCount, sourceFile, 
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

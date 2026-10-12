@@ -1,3 +1,5 @@
+import CustomSelect from '../common/CustomSelect'
+
 export default function Pagination({
   page,
   totalPages,
@@ -20,16 +22,17 @@ export default function Pagination({
         Next ▶
       </button>
       {pageSizeOptions && (
-        <label className="pagination-size">
-          Rows per page
-          <select value={pageSize} onChange={(e) => onPageSizeChange(Number(e.target.value))}>
-            {pageSizeOptions.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="pagination-size">
+          <span>Rows per page</span>
+          <CustomSelect
+            size="sm"
+            value={pageSize}
+            onChange={(v) => onPageSizeChange(Number(v))}
+            options={pageSizeOptions.map((n) => ({ value: n, label: String(n) }))}
+            ariaLabel="Rows per page"
+            triggerClassName="pagination-size-select"
+          />
+        </div>
       )}
     </div>
   )
