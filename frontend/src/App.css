@@ -342,6 +342,11 @@
   box-shadow: var(--shadow-card);
   padding: 18px 20px;
 }
+/* Sidebar cards only -- shrinks the sidebar's footprint without touching
+   the main-content panels (inventory table, diagram, network summary). */
+.sidebar .panel {
+  padding: 14px 16px;
+}
 .panel h2 {
   margin: 0 0 14px;
   font-size: 0.9rem;
@@ -366,11 +371,11 @@
 .panel label {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  font-size: 13px;
+  gap: 4px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-secondary);
-  margin-bottom: 16px;
+  margin-bottom: 12px;
   min-width: 0;
 }
 .panel select,
@@ -378,13 +383,13 @@
 .readonly-display {
   box-sizing: border-box;
   width: 100%;
-  height: 40px;
-  padding: 0 12px;
+  height: 32px;
+  padding: 0 10px;
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--surface);
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
@@ -394,12 +399,15 @@
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
-.panel .custom-select-md {
+/* Sidebar dropdowns match "4. Road Inventory Data" filter dropdowns exactly
+   (same 32px/13px/6px-radius sizing) -- same rule shape as
+   .filter-bar .filter-field .custom-select-sm, just scoped to .panel. */
+.panel .custom-select-sm {
   width: 100%;
-  height: 40px;
-  padding: 0 12px;
-  border-radius: 8px;
-  font-size: 14px;
+  height: 32px;
+  padding: 4px 28px 4px 10px;
+  border-radius: 6px;
+  font-size: 13px;
 }
 .panel input[type='text'].field-invalid {
   border-color: var(--critical);
@@ -416,7 +424,7 @@
 .readonly-placeholder {
   color: var(--text-muted);
   font-style: italic;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 /* ===== CustomSelect (replaces native <select>) ===== */
@@ -602,7 +610,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 .settings-row label {
   min-width: 0;
@@ -614,8 +622,8 @@
   justify-content: space-between;
   align-items: baseline;
   gap: 8px;
-  margin: -8px 0 16px;
-  font-size: 12px;
+  margin: -8px 0 12px;
+  font-size: 11px;
   color: var(--text-muted);
 }
 .range-reset-link {
@@ -623,7 +631,7 @@
   border: none;
   padding: 0;
   color: var(--accent);
-  font-size: 12px;
+  font-size: 11px;
   white-space: nowrap;
 }
 .range-reset-link:hover {
@@ -777,11 +785,11 @@ button:focus-visible {
 
 .primary-button {
   width: 100%;
-  height: 40px;
+  height: 36px;
   border-radius: 8px;
   font-weight: 600;
   padding: 0 11px;
-  font-size: 0.85rem;
+  font-size: 13px;
 }
 
 .spinner {
@@ -920,12 +928,10 @@ button:focus-visible {
   background: var(--critical);
 }
 .upload-summary-title {
-  font-size: 0.78rem;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: break-word;
 }
 .upload-summary-toggle {
   flex-shrink: 0;

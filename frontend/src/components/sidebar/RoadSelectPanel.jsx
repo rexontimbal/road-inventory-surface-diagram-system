@@ -40,7 +40,7 @@ export default function RoadSelectPanel({ roads, selectedRoadId, onSelect, roadN
       <label>
         Road ID
         <CustomSelect
-          size="md"
+          size="sm"
           value={selectedRoadId || ''}
           onChange={onSelect}
           disabled={roads.length === 0}

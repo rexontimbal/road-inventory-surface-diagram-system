@@ -100,7 +100,7 @@ export default function DiagramSettingsPanel({
         <label>
           Station Interval
           <CustomSelect
-            size="md"
+            size="sm"
             ariaLabel="Station Interval"
             value={settings.stationIntervalM}
             onChange={(v) => onChange({ ...settings, stationIntervalM: Number(v) })}
@@ -110,7 +110,7 @@ export default function DiagramSettingsPanel({
         <label>
           Stations per Line
           <CustomSelect
-            size="md"
+            size="sm"
             ariaLabel="Stations per Line"
             value={settings.stationsPerLine}
             onChange={(v) => onChange({ ...settings, stationsPerLine: Number(v) })}
