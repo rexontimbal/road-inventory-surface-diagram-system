@@ -35,7 +35,7 @@ function openHowToUse() {
   })
 }
 
-export default function Header({ summary, lastUploadAt }) {
+export default function Header({ summary, lastUploadAt, networkSummaryOpen, onToggleNetworkSummary }) {
   const [shrunk, setShrunk] = useState(false)
   const shrunkRef = useRef(false)
   const tickingRef = useRef(false)
@@ -99,12 +99,29 @@ export default function Header({ summary, lastUploadAt }) {
                   </svg>
                   {(summary.total_length_m / 1000).toFixed(1)} km
                 </span>
-                <span className="header-stat-chip header-stat-chip-good">
+                <button
+                  type="button"
+                  className={`header-stat-chip header-stat-chip-good header-stat-chip-toggle${networkSummaryOpen ? ' header-stat-chip-toggle-open' : ''}`}
+                  onClick={onToggleNetworkSummary}
+                  aria-expanded={networkSummaryOpen}
+                  aria-controls="network-summary-panel"
+                  title={networkSummaryOpen ? 'Hide network breakdown' : 'Show network breakdown'}
+                >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <path d="m6 12 4 4 8-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                   {summary.pct}% asphalted
-                </span>
+                  <svg
+                    className="header-stat-chip-chevron"
+                    width="10"
+                    height="10"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    aria-hidden="true"
+                  >
+                    <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
               </div>
               {lastUploadAt && (
                 <span className="header-last-upload">

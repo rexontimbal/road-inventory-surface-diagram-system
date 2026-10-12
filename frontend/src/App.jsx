@@ -18,6 +18,15 @@ import { showToast } from './components/common/DialogProvider'
 import './App.css'
 
 const PAGE_SIZE = 10
+const NETWORK_SUMMARY_OPEN_KEY = 'ris.networkSummaryOpen'
+
+function readStoredNetworkSummaryOpen() {
+  try {
+    return localStorage.getItem(NETWORK_SUMMARY_OPEN_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
 
 export default function App() {
   const [roads, setRoads] = useState([])
@@ -35,6 +44,7 @@ export default function App() {
   const [hasGenerated, setHasGenerated] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [lastUploadAt, setLastUploadAt] = useState(null)
+  const [networkSummaryOpen, setNetworkSummaryOpen] = useState(readStoredNetworkSummaryOpen)
 
   async function refreshRoads() {
     const list = await fetchRoadsList()
@@ -56,6 +66,18 @@ export default function App() {
     refreshSegmentsPage(1, tableFilters, tableSort)
     refreshSummary()
   }, [])
+
+  function toggleNetworkSummary() {
+    setNetworkSummaryOpen((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem(NETWORK_SUMMARY_OPEN_KEY, String(next))
+      } catch {
+        // localStorage unavailable (private mode, etc.) -- toggle still works for this session
+      }
+      return next
+    })
+  }
 
   useEffect(() => {
     document.title = selectedRoadId
@@ -150,7 +172,12 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <Header summary={networkSummary} lastUploadAt={lastUploadAt} />
+      <Header
+        summary={networkSummary}
+        lastUploadAt={lastUploadAt}
+        networkSummaryOpen={networkSummaryOpen}
+        onToggleNetworkSummary={toggleNetworkSummary}
+      />
       <div className="main-layout">
         <aside className={`sidebar${sidebarCollapsed ? ' collapsed' : ''}`}>
           <button
@@ -194,7 +221,12 @@ export default function App() {
           />
         </aside>
         <main className="content">
-          <NetworkSummaryBar summary={networkSummary} />
+          <NetworkSummaryBar
+            summary={networkSummary}
+            open={networkSummaryOpen}
+            onClose={() => networkSummaryOpen && toggleNetworkSummary()}
+            onSelectRoad={handleSelectRoad}
+          />
           <RoadInventoryTable
             segmentsPage={segmentsPage}
             onPageChange={setTablePage}
