@@ -1,7 +1,15 @@
 import Pagination from './Pagination'
+import CustomSelect from '../common/CustomSelect'
 import { getSegmentsExportUrl } from '../../api/roads'
+import { SURFACE_SWATCHES } from '../../utils/surfaceSwatches'
 
 const SURFACE_TYPE_OPTIONS = ['unpaved', 'paved', 'gravel', 'asphalt']
+
+const STATUS_OPTIONS = [
+  { value: '', label: 'All statuses' },
+  { value: 'Complete', label: 'Complete' },
+  { value: 'Incomplete', label: 'Incomplete' },
+]
 
 const COLUMNS = [
   { label: '#', key: null },
@@ -27,8 +35,15 @@ export default function RoadInventoryTable({
 }) {
   const records = segmentsPage?.records || []
   const hasActiveFilters = !!(filters.roadId || filters.status || filters.surfaceType)
-  const selectedRoad = roads.find((r) => r.road_id === filters.roadId)
-  const roadSelectTitle = selectedRoad ? `${selectedRoad.road_id} — ${selectedRoad.road_name}` : 'All roads'
+
+  const roadOptions = [
+    { value: '', label: 'All roads' },
+    ...roads.map((r) => ({ value: r.road_id, label: `${r.road_id} — ${r.road_name}`, roadName: r.road_name })),
+  ]
+  const surfaceOptions = [
+    { value: '', label: 'All surface types' },
+    ...SURFACE_TYPE_OPTIONS.map((s) => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) })),
+  ]
 
   function updateFilter(key, value) {
     onFilterChange({ ...filters, [key]: value })
@@ -50,40 +65,69 @@ export default function RoadInventoryTable({
       </div>
 
       <div className="filter-bar">
-        <label className="filter-field filter-field-road">
+        <div className="filter-field filter-field-road">
           <span>Road</span>
-          <select
+          <CustomSelect
+            size="sm"
             value={filters.roadId}
-            title={roadSelectTitle}
-            onChange={(e) => updateFilter('roadId', e.target.value)}
-          >
-            <option value="">All roads</option>
-            {roads.map((r) => (
-              <option key={r.road_id} value={r.road_id}>
-                {r.road_id} — {r.road_name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="filter-field filter-field-narrow">
+            onChange={(v) => updateFilter('roadId', v)}
+            options={roadOptions}
+            ariaLabel="Filter by road"
+            searchable
+            searchPlaceholder="Search road ID or name…"
+            getSearchText={(o) => o.label}
+            renderOption={(o) =>
+              o.value === '' ? (
+                o.label
+              ) : (
+                <div className="custom-select-road-option">
+                  <span className="custom-select-road-id">{o.value}</span>
+                  <span className="custom-select-road-name">{o.roadName}</span>
+                </div>
+              )
+            }
+          />
+        </div>
+        <div className="filter-field filter-field-narrow">
           <span>Status</span>
-          <select value={filters.status} onChange={(e) => updateFilter('status', e.target.value)}>
-            <option value="">All statuses</option>
-            <option value="Complete">Complete</option>
-            <option value="Incomplete">Incomplete</option>
-          </select>
-        </label>
-        <label className="filter-field filter-field-surface">
+          <CustomSelect
+            size="sm"
+            value={filters.status}
+            onChange={(v) => updateFilter('status', v)}
+            options={STATUS_OPTIONS}
+            ariaLabel="Filter by status"
+            renderOption={(o) =>
+              o.value === '' ? (
+                o.label
+              ) : (
+                <span className={`status-badge ${o.value === 'Complete' ? 'status-badge-good' : 'status-badge-critical'}`}>
+                  <span aria-hidden="true">{o.value === 'Complete' ? '✓' : '✕'}</span>
+                  {o.label}
+                </span>
+              )
+            }
+          />
+        </div>
+        <div className="filter-field filter-field-surface">
           <span>Surface Type</span>
-          <select value={filters.surfaceType} onChange={(e) => updateFilter('surfaceType', e.target.value)}>
-            <option value="">All surface types</option>
-            {SURFACE_TYPE_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {s.charAt(0).toUpperCase() + s.slice(1)}
-              </option>
-            ))}
-          </select>
-        </label>
+          <CustomSelect
+            size="sm"
+            value={filters.surfaceType}
+            onChange={(v) => updateFilter('surfaceType', v)}
+            options={surfaceOptions}
+            ariaLabel="Filter by surface type"
+            renderOption={(o) =>
+              o.value === '' ? (
+                o.label
+              ) : (
+                <span className="custom-select-surface-option">
+                  <span className="custom-select-surface-swatch" style={SURFACE_SWATCHES[o.value]} />
+                  {o.label}
+                </span>
+              )
+            }
+          />
+        </div>
         {hasActiveFilters && (
           <div className="filter-action">
             <span className="filter-label-spacer">&nbsp;</span>

@@ -1,4 +1,5 @@
 import { formatStation, parseStationInput } from '../../utils/chainage'
+import CustomSelect from '../common/CustomSelect'
 
 const INTERVAL_OPTIONS = [
   { label: '500 meters', value: 500 },
@@ -98,29 +99,23 @@ export default function DiagramSettingsPanel({
       <div className="settings-row">
         <label>
           Station Interval
-          <select
+          <CustomSelect
+            size="md"
+            ariaLabel="Station Interval"
             value={settings.stationIntervalM}
-            onChange={(e) => onChange({ ...settings, stationIntervalM: Number(e.target.value) })}
-          >
-            {INTERVAL_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => onChange({ ...settings, stationIntervalM: Number(v) })}
+            options={INTERVAL_OPTIONS}
+          />
         </label>
         <label>
           Stations per Line
-          <select
+          <CustomSelect
+            size="md"
+            ariaLabel="Stations per Line"
             value={settings.stationsPerLine}
-            onChange={(e) => onChange({ ...settings, stationsPerLine: Number(e.target.value) })}
-          >
-            {STATIONS_PER_LINE_OPTIONS.map((n) => (
-              <option key={n} value={n}>
-                {n} intervals
-              </option>
-            ))}
-          </select>
+            onChange={(v) => onChange({ ...settings, stationsPerLine: Number(v) })}
+            options={STATIONS_PER_LINE_OPTIONS.map((n) => ({ value: n, label: `${n} intervals` }))}
+          />
         </label>
       </div>
       <button className="primary-button" onClick={onGenerate} disabled={!canGenerate || !rangeValid}>

@@ -1,8 +1,10 @@
+import { SURFACE_SWATCHES } from '../../utils/surfaceSwatches'
+
 const ITEMS = [
-  { label: 'UNPAVED', swatch: { background: '#FFFFFF', border: '1px solid #333' } },
-  { label: 'PAVED', swatch: { background: '#9E9E9E' } },
-  { label: 'ASPHALT', swatch: { background: '#000000' } },
-  { label: 'GRAVEL', swatch: { background: 'repeating-linear-gradient(45deg, #fff 0 2px, #000 2px 3px)', border: '1px solid #333' } },
+  { label: 'UNPAVED', swatch: SURFACE_SWATCHES.unpaved },
+  { label: 'PAVED', swatch: SURFACE_SWATCHES.paved },
+  { label: 'ASPHALT', swatch: SURFACE_SWATCHES.asphalt },
+  { label: 'GRAVEL', swatch: SURFACE_SWATCHES.gravel },
 ]
 
 export default function Legend() {

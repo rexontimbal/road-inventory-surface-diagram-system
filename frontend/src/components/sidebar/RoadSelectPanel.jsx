@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { showConfirm } from '../common/DialogProvider'
+import CustomSelect from '../common/CustomSelect'
 
 export default function RoadSelectPanel({ roads, selectedRoadId, onSelect, roadName, onDelete, onExpand }) {
   const [deleting, setDeleting] = useState(false)
@@ -38,20 +39,24 @@ export default function RoadSelectPanel({ roads, selectedRoadId, onSelect, roadN
       <h2>2. Select Road</h2>
       <label>
         Road ID
-        <select
+        <CustomSelect
+          size="md"
           value={selectedRoadId || ''}
-          onChange={(e) => onSelect(e.target.value)}
+          onChange={onSelect}
           disabled={roads.length === 0}
-        >
-          <option value="" disabled>
-            {roads.length === 0 ? 'Upload Excel first' : 'Select a road'}
-          </option>
-          {roads.map((r) => (
-            <option key={r.road_id} value={r.road_id}>
-              {r.road_id}
-            </option>
-          ))}
-        </select>
+          placeholder={roads.length === 0 ? 'Upload Excel first' : 'Select a road'}
+          ariaLabel="Road ID"
+          searchable
+          searchPlaceholder="Search road ID or name…"
+          getSearchText={(o) => `${o.value} ${o.roadName}`}
+          options={roads.map((r) => ({ value: r.road_id, label: r.road_id, roadName: r.road_name }))}
+          renderOption={(o) => (
+            <div className="custom-select-road-option">
+              <span className="custom-select-road-id">{o.value}</span>
+              <span className="custom-select-road-name">{o.roadName}</span>
+            </div>
+          )}
+        />
       </label>
       <label>
         Road Name
