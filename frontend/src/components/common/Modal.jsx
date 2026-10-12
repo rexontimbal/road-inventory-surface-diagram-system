@@ -91,14 +91,16 @@ export default function Modal({
         aria-modal="true"
         aria-labelledby="modal-title"
       >
-        <div className={`modal-icon modal-icon-${variant}`} aria-hidden="true">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-            {ICONS[variant] || ICONS.info}
-          </svg>
+        <div className="modal-header">
+          <div className={`modal-icon modal-icon-${variant}`} aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              {ICONS[variant] || ICONS.info}
+            </svg>
+          </div>
+          <h3 id="modal-title" className="modal-title">
+            {title}
+          </h3>
         </div>
-        <h3 id="modal-title" className="modal-title">
-          {title}
-        </h3>
         <p className="modal-message">{message}</p>
         <div className="modal-actions">
           {!alertOnly && (

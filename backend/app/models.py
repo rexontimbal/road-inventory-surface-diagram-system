@@ -5,6 +5,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
@@ -20,6 +21,8 @@ class Road(Base):
     road_id = Column(String, primary_key=True)
     road_name = Column(String, nullable=False)
     updated_at = Column(String, nullable=False)
+    uploaded_at = Column(String, nullable=True)
+    source_file = Column(String, nullable=True)
     segment_count = Column(Integer, nullable=False, default=0)
     total_length_m = Column(Integer, nullable=False, default=0)
 
@@ -56,3 +59,33 @@ class RoadSegment(Base):
         CheckConstraint(f"shoulder_right IN {SURFACE_TYPES}", name="ck_shoulder_right"),
         Index("idx_segments_road_start", "road_id", "start_m"),
     )
+
+
+class UploadLogEntry(Base):
+    """One row per upload attempt or road deletion -- an audit trail kept in
+    the same database as the road data it describes (not browser storage),
+    so 'Write the log in the same transaction as the data save' is literally
+    true, and the history is shared across whoever uses this office tool
+    rather than stuck in one browser."""
+
+    __tablename__ = "upload_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(String, nullable=False)
+    kind = Column(String, nullable=False)  # "upload" | "delete"
+    status = Column(String, nullable=False)  # "completed" | "cancelled" | "failed"
+    file_name = Column(String, nullable=True)
+    file_size = Column(Integer, nullable=True)
+    total_rows = Column(Integer, nullable=True)
+    error_message = Column(Text, nullable=True)
+    added_count = Column(Integer, nullable=False, default=0)
+    replaced_count = Column(Integer, nullable=False, default=0)
+    kept_count = Column(Integer, nullable=False, default=0)
+    up_to_date_count = Column(Integer, nullable=False, default=0)
+    rejected_count = Column(Integer, nullable=False, default=0)
+    deleted_count = Column(Integer, nullable=False, default=0)
+    # JSON-encoded list of per-road detail dicts: road_id, road_name, action,
+    # segment_count, change_summary, rejection_reasons. Kept as one blob
+    # rather than a child table -- it's always read/written as a whole with
+    # its parent entry, never queried independently.
+    details_json = Column(Text, nullable=False, default="[]")

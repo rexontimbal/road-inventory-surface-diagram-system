@@ -15,6 +15,18 @@ const HOW_TO_USE_STEPS = [
   { title: 'Print / Export', detail: 'Use "Print / PDF" or "Export PNG" above the diagram to save it.' },
 ]
 
+function formatLastUpload(date) {
+  const now = new Date()
+  const time = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  const isToday = date.toDateString() === now.toDateString()
+  if (isToday) return `Last upload: ${time}`
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  if (date.toDateString() === yesterday.toDateString()) return `Last upload: Yesterday, ${time}`
+  const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
+  return `Last upload: ${dateStr}, ${time}`
+}
+
 function openHowToUse() {
   showAlert({
     title: 'How to use this system',
@@ -124,8 +136,11 @@ export default function Header({ summary, lastUploadAt, networkSummaryOpen, onTo
                 </button>
               </div>
               {lastUploadAt && (
-                <span className="header-last-upload">
-                  Last upload: {lastUploadAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                <span
+                  className="header-last-upload"
+                  title={lastUploadAt.toLocaleString([], { dateStyle: 'full', timeStyle: 'medium' })}
+                >
+                  {formatLastUpload(lastUploadAt)}
                 </span>
               )}
             </>

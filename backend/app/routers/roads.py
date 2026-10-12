@@ -1,6 +1,8 @@
 import csv
 import io
+import time
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sqlalchemy import case, func
@@ -8,23 +10,47 @@ from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
 from app.db import get_db
-from app.excel_import import TemplateError, parse_upload
-from app.models import Road, RoadSegment
+from app.excel_import import ImportResult, TemplateError, parse_upload
+from app.models import Road, RoadSegment, UploadLogEntry  # noqa: F401 -- UploadLogEntry import registers the table for create_all
 from app.schemas import (
     NetworkSummary,
     RoadDetail,
     RoadImportedOut,
+    RoadPreviewDuplicate,
+    RoadPreviewNew,
     RoadRejectionOut,
+    RoadSkippedOut,
     RoadSummary,
     RoadSummaryStat,
     RowErrorOut,
     SegmentOut,
     SegmentRecord,
     SegmentsPage,
+    UploadCancelIn,
+    UploadCommitIn,
+    UploadLogPage,
+    UploadPreview,
     UploadResult,
 )
+from app.upload_log import compare_segments, export_log_csv, query_log, write_log_entry
 
 router = APIRouter(prefix="/api/roads", tags=["roads"])
+
+# In-process cache bridging preview -> commit: the parsed plan (which can
+# include thousands of segment rows) is kept server-side so the client only
+# ever has to send/receive the small per-road summaries, not the full parsed
+# file twice. Single-office tool, single process -- an in-memory dict is
+# enough; no need for a shared cache/session store. Entries expire so an
+# abandoned preview (closed tab, never confirmed) doesn't leak memory.
+_PENDING_UPLOADS: dict[str, tuple[ImportResult, str, int, float]] = {}
+_PENDING_TTL_SECONDS = 15 * 60
+
+
+def _prune_pending_uploads():
+    now = time.time()
+    expired = [token for token, (_, _, _, expires_at) in _PENDING_UPLOADS.items() if expires_at < now]
+    for token in expired:
+        _PENDING_UPLOADS.pop(token, None)
 
 
 def _derive_status(surface_type: str) -> str:
@@ -79,28 +105,147 @@ def _apply_sort(query, sort_by, sort_dir):
     return query.order_by(ordered, RoadSegment.road_id, RoadSegment.seq_no)
 
 
-@router.post("/upload", response_model=UploadResult)
-async def upload_roads(file: UploadFile, db: Session = Depends(get_db)):
+def _rejected_out(result: ImportResult) -> list[RoadRejectionOut]:
+    return [
+        RoadRejectionOut(
+            road_id=r.road_id,
+            errors=[RowErrorOut(row=e.row, field=e.field, message=e.message) for e in r.errors],
+        )
+        for r in result.rejected
+    ]
+
+
+@router.post("/upload/preview", response_model=UploadPreview)
+async def upload_preview(file: UploadFile, db: Session = Depends(get_db)):
+    """Parses and validates the file (same rules as before) but writes
+    nothing. Splits accepted roads into brand-new vs. Road-ID conflicts with
+    an existing road (trimmed, case-insensitive match) so the frontend can
+    ask the user how to handle each conflict before anything is saved."""
     contents = await file.read()
     try:
         result = parse_upload(contents)
     except TemplateError as exc:
+        write_log_entry(
+            db,
+            kind="upload",
+            status="failed",
+            file_name=file.filename,
+            file_size=len(contents),
+            error_message=str(exc),
+        )
+        db.commit()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    imported: list[RoadImportedOut] = []
+    _prune_pending_uploads()
+    token = str(uuid4())
+    _PENDING_UPLOADS[token] = (result, file.filename, len(contents), time.time() + _PENDING_TTL_SECONDS)
+
+    existing_by_key = {road.road_id.strip().lower(): road for road in db.query(Road).all()}
+
+    new_roads: list[RoadPreviewNew] = []
+    duplicates: list[RoadPreviewDuplicate] = []
+    for plan in result.accepted:
+        existing = existing_by_key.get(plan.road_id.strip().lower())
+        if existing is None:
+            new_roads.append(
+                RoadPreviewNew(
+                    road_id=plan.road_id,
+                    road_name=plan.road_name,
+                    segment_count=len(plan.segments),
+                    total_length_m=plan.total_length_m,
+                )
+            )
+        else:
+            duplicates.append(
+                RoadPreviewDuplicate(
+                    road_id=plan.road_id,
+                    existing_road_name=existing.road_name,
+                    new_road_name=plan.road_name,
+                    name_changed=existing.road_name.strip().lower() != plan.road_name.strip().lower(),
+                    existing_segment_count=existing.segment_count,
+                    existing_total_length_m=existing.total_length_m,
+                    existing_updated_at=existing.updated_at,
+                    existing_source_file=existing.source_file,
+                    new_segment_count=len(plan.segments),
+                    new_total_length_m=plan.total_length_m,
+                )
+            )
+
+    return UploadPreview(
+        token=token,
+        source_file=file.filename,
+        new_roads=new_roads,
+        duplicates=duplicates,
+        rejected=_rejected_out(result),
+        total_rows_processed=result.total_rows_processed,
+        ignored_columns=result.ignored_columns,
+    )
+
+
+@router.post("/upload/commit", response_model=UploadResult)
+def upload_commit(body: UploadCommitIn, db: Session = Depends(get_db)):
+    """Applies a previously-previewed upload. `decisions` only needs entries
+    for road IDs that were flagged as duplicates in the preview -- any
+    accepted road with no decision (i.e. it was new, no conflict) is always
+    added. 'keep' leaves the existing road completely untouched; 'replace'
+    deletes its old segments and inserts the new ones (no mixing)."""
+    _prune_pending_uploads()
+    entry = _PENDING_UPLOADS.pop(body.token, None)
+    if entry is None:
+        raise HTTPException(
+            status_code=400,
+            detail="This upload session has expired or was already applied. Please re-upload the file.",
+        )
+    result, source_file, file_size, _ = entry
+
+    existing_by_key = {road.road_id.strip().lower(): road for road in db.query(Road).all()}
+
     now = datetime.now(timezone.utc).isoformat()
+    imported: list[RoadImportedOut] = []
+    skipped: list[RoadSkippedOut] = []
+    log_details: list[dict] = []
 
     for plan in result.accepted:
+        existing = existing_by_key.get(plan.road_id.strip().lower())
+        action = body.decisions.get(plan.road_id, "replace")
+
+        if existing is not None and action == "keep":
+            skipped.append(RoadSkippedOut(road_id=plan.road_id, road_name=plan.road_name))
+            log_details.append(
+                {
+                    "road_id": plan.road_id,
+                    "road_name": plan.road_name,
+                    "action": "kept_existing",
+                    "segment_count": existing.segment_count,
+                }
+            )
+            continue
+
+        # Snapshot the existing segments (and detect whether anything would
+        # actually change) BEFORE the bulk delete below evicts them -- this
+        # only affects what gets logged, never the replace/keep decision
+        # itself or what ends up stored.
+        is_up_to_date = False
+        change_summary = None
+        if existing is not None:
+            existing_segments = list(existing.segments)
+            is_up_to_date, change_summary = compare_segments(
+                existing_segments, plan.segments, existing.road_name, plan.road_name
+            )
+
+        uploaded_at = existing.uploaded_at if existing is not None and existing.uploaded_at else now
+
         db.query(RoadSegment).filter(RoadSegment.road_id == plan.road_id).delete()
         db.query(Road).filter(Road.road_id == plan.road_id).delete()
 
-        total_length_m = plan.total_length_m
         road = Road(
             road_id=plan.road_id,
             road_name=plan.road_name,
             updated_at=now,
+            uploaded_at=uploaded_at,
+            source_file=source_file,
             segment_count=len(plan.segments),
-            total_length_m=total_length_m,
+            total_length_m=plan.total_length_m,
         )
         db.add(road)
 
@@ -121,30 +266,96 @@ async def upload_roads(file: UploadFile, db: Session = Depends(get_db)):
                 )
             )
 
+        row_action = "up_to_date" if is_up_to_date else ("replaced" if existing is not None else "added")
         imported.append(
             RoadImportedOut(
                 road_id=plan.road_id,
                 road_name=plan.road_name,
                 segment_count=len(plan.segments),
+                action=row_action,
             )
         )
+        log_details.append(
+            {
+                "road_id": plan.road_id,
+                "road_name": plan.road_name,
+                "action": row_action,
+                "segment_count": len(plan.segments),
+                "change_summary": change_summary,
+            }
+        )
+
+    for rejection in result.rejected:
+        log_details.append(
+            {
+                "road_id": rejection.road_id,
+                "road_name": rejection.road_id,
+                "action": "rejected",
+                "rejection_reasons": [f"Row {e.row} ({e.field}): {e.message}" for e in rejection.errors],
+            }
+        )
+
+    write_log_entry(
+        db,
+        kind="upload",
+        status="completed",
+        file_name=source_file,
+        file_size=file_size,
+        total_rows=result.total_rows_processed,
+        details=log_details,
+    )
 
     db.commit()
 
-    rejected = [
-        RoadRejectionOut(
-            road_id=r.road_id,
-            errors=[RowErrorOut(row=e.row, field=e.field, message=e.message) for e in r.errors],
-        )
-        for r in result.rejected
-    ]
-
     return UploadResult(
         imported=imported,
-        rejected=rejected,
+        rejected=_rejected_out(result),
+        skipped=skipped,
         total_rows_processed=result.total_rows_processed,
         ignored_columns=result.ignored_columns,
     )
+
+
+@router.post("/upload/cancel")
+def upload_cancel(body: UploadCancelIn, db: Session = Depends(get_db)):
+    """Logs a cancelled upload (whatever the preview found, nothing applied)
+    and discards the pending token. Safe to call even if the token already
+    expired -- still logs a minimal cancelled entry."""
+    _prune_pending_uploads()
+    entry = _PENDING_UPLOADS.pop(body.token, None)
+
+    log_details: list[dict] = []
+    file_name = None
+    file_size = None
+    total_rows = None
+    if entry is not None:
+        result, file_name, file_size, _ = entry
+        total_rows = result.total_rows_processed
+        for plan in result.accepted:
+            log_details.append(
+                {"road_id": plan.road_id, "road_name": plan.road_name, "action": "added", "segment_count": len(plan.segments)}
+            )
+        for rejection in result.rejected:
+            log_details.append(
+                {
+                    "road_id": rejection.road_id,
+                    "road_name": rejection.road_id,
+                    "action": "rejected",
+                    "rejection_reasons": [f"Row {e.row} ({e.field}): {e.message}" for e in rejection.errors],
+                }
+            )
+
+    write_log_entry(
+        db,
+        kind="upload",
+        status="cancelled",
+        file_name=file_name,
+        file_size=file_size,
+        total_rows=total_rows,
+        details=log_details,
+    )
+    db.commit()
+    return {"logged": True}
 
 
 @router.get("", response_model=list[RoadSummary])
@@ -304,6 +515,44 @@ def get_network_summary(db: Session = Depends(get_db)):
     )
 
 
+@router.get("/upload-log", response_model=UploadLogPage)
+def get_upload_log(
+    search: str | None = None,
+    action: str | None = None,
+    date_range: str | None = None,
+    page: int = 1,
+    page_size: int = 10,
+    db: Session = Depends(get_db),
+):
+    if page < 1:
+        raise HTTPException(status_code=400, detail="page must be >= 1")
+    if page_size < 1 or page_size > 200:
+        raise HTTPException(status_code=400, detail="page_size must be between 1 and 200")
+    return query_log(db, search=search, action=action, date_range=date_range, page=page, page_size=page_size)
+
+
+@router.get("/upload-log/export")
+def export_upload_log(
+    search: str | None = None,
+    action: str | None = None,
+    date_range: str | None = None,
+    db: Session = Depends(get_db),
+):
+    csv_text = export_log_csv(db, search=search, action=action, date_range=date_range)
+    return StreamingResponse(
+        iter([csv_text]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=upload_history.csv"},
+    )
+
+
+@router.delete("/upload-log")
+def clear_upload_log(db: Session = Depends(get_db)):
+    count = db.query(UploadLogEntry).delete()
+    db.commit()
+    return {"cleared": count}
+
+
 @router.get("/{road_id}", response_model=RoadDetail)
 def get_road_detail(road_id: str, db: Session = Depends(get_db)):
     road = db.query(Road).filter(Road.road_id == road_id).first()
@@ -338,6 +587,13 @@ def delete_road(road_id: str, db: Session = Depends(get_db)):
     road = db.query(Road).filter(Road.road_id == road_id).first()
     if road is None:
         raise HTTPException(status_code=404, detail=f"Road '{road_id}' not found")
+    road_name = road.road_name
     db.delete(road)
+    write_log_entry(
+        db,
+        kind="delete",
+        status="completed",
+        details=[{"road_id": road_id, "road_name": road_name, "action": "deleted"}],
+    )
     db.commit()
     return {"deleted": road_id}

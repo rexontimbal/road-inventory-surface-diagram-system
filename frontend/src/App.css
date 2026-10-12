@@ -803,6 +803,61 @@ button:focus-visible {
   color: var(--text-muted);
   margin: 10px 0 0;
 }
+.file-name-restored {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-style: italic;
+}
+.file-name-restored svg {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+.file-name-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.file-name-row .file-name {
+  margin-top: 10px;
+}
+
+/* Upload-history icon button: sits beside "View details" in the card header,
+   or beside "No file selected" when there's no current upload data. */
+.history-icon-btn {
+  position: relative;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 7px;
+  color: #64748b;
+}
+.history-icon-btn:hover {
+  background: #eff6ff;
+  border-color: transparent;
+  color: #2563eb;
+}
+.history-icon-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35);
+}
+.history-icon-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2563eb;
+  border: 1.5px solid var(--surface);
+}
 
 .required-columns {
   margin-top: 14px;
@@ -930,6 +985,41 @@ button:focus-visible {
   color: var(--text-muted);
   white-space: nowrap;
   flex-shrink: 0;
+}
+.upload-summary-row-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.upload-summary-badge {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.upload-summary-badge-added {
+  background: var(--good-soft);
+  color: var(--good);
+}
+.upload-summary-badge-replaced {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.upload-summary-badge-skipped,
+.upload-summary-badge-kept_existing,
+.upload-summary-badge-up_to_date {
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.upload-summary-badge-rejected {
+  background: var(--critical-soft);
+  color: var(--critical);
 }
 .upload-summary-road-name {
   color: var(--text-secondary);
@@ -1673,7 +1763,7 @@ tbody tr:last-child td {
   background: var(--surface);
   border-radius: 12px;
   box-shadow: var(--shadow-md), 0 24px 48px rgba(0, 0, 0, 0.18);
-  padding: 24px;
+  padding: 20px 24px 24px;
   animation: modal-scale-in 150ms ease-out;
 }
 @keyframes modal-fade-in {
@@ -1694,14 +1784,23 @@ tbody tr:last-child td {
     transform: scale(1) translateY(0);
   }
 }
+/* Icon + title share one row, icon pinned to the first line of the title
+   even when it wraps (align-items: flex-start, not center) -- a close
+   button, when a modal has one, lives on this same row via margin-left:auto. */
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 8px;
+}
 .modal-icon {
-  width: 44px;
-  height: 44px;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
   border-radius: 999px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 14px;
 }
 .modal-icon-danger {
   background: var(--critical-soft);
@@ -1720,7 +1819,9 @@ tbody tr:last-child td {
   color: var(--good);
 }
 .modal-title {
-  margin: 0 0 8px;
+  flex: 1;
+  min-width: 0;
+  margin: 7px 0 0;
   font-size: 16px;
   font-weight: 600;
   color: var(--text-primary);
@@ -1779,6 +1880,362 @@ tbody tr:last-child td {
   background: #b91c1c;
   border-color: #b91c1c;
   color: #fff;
+}
+
+/* ===== Upload duplicate-Road-ID conflict modal ===== */
+.conflict-modal-card {
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;
+}
+.conflict-bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -8px 0 12px;
+  font-size: 13px;
+}
+.conflict-bulk-sep {
+  color: var(--text-muted);
+}
+.conflict-list {
+  overflow-y: auto;
+  max-height: 340px;
+  margin: 0 -4px 16px;
+  padding: 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.conflict-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--surface-sunken);
+}
+.conflict-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.conflict-road-id {
+  font-size: 14px;
+}
+.conflict-road-name {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.conflict-name-changed {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--warning);
+}
+.conflict-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 10px;
+}
+.conflict-compare-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.conflict-compare-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.conflict-compare-stats {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.conflict-compare-muted {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conflict-toggle {
+  display: flex;
+  margin-top: 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  overflow: hidden;
+}
+.conflict-toggle-btn {
+  flex: 1;
+  border: none;
+  border-radius: 0;
+  background: #ffffff;
+  color: #1e293b;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 7px 0;
+}
+.conflict-toggle-btn:first-child {
+  border-right: 1px solid #cbd5e1;
+}
+.conflict-toggle-btn:hover {
+  background: #f1f5f9;
+  color: #1e293b;
+}
+.conflict-toggle-btn-active {
+  background: var(--accent);
+  color: #ffffff;
+}
+.conflict-toggle-btn-active:hover {
+  background: var(--accent-hover);
+  color: #ffffff;
+}
+
+/* ===== Upload History modal ===== */
+.history-modal-card {
+  max-width: 880px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  max-height: 88vh;
+}
+.history-modal-subtitle {
+  margin: 0 0 16px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.history-modal-close {
+  flex-shrink: 0;
+  margin-left: auto;
+  align-self: flex-start;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: 50%;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+}
+.history-modal-close:hover {
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+}
+
+.history-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.history-search {
+  box-sizing: border-box;
+  flex: 1;
+  min-width: 180px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--surface);
+}
+.history-search:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.history-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 46vh;
+  margin-bottom: 12px;
+}
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.history-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #0f172a;
+  color: #fff;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 8px 10px;
+}
+.history-table tbody td {
+  padding: 9px 10px;
+  border-top: 1px solid var(--border);
+  vertical-align: top;
+}
+.history-row {
+  cursor: pointer;
+}
+.history-row:hover {
+  background: var(--surface-sunken);
+}
+.history-cell-nowrap {
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+.history-cell-file {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.history-status {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.history-status-completed {
+  color: var(--good);
+}
+.history-status-cancelled {
+  color: var(--text-muted);
+}
+.history-status-failed {
+  color: var(--critical);
+}
+.history-chevron {
+  display: inline-block;
+  color: var(--text-muted);
+  transition: transform 200ms ease;
+}
+.history-chevron-open {
+  transform: rotate(180deg);
+}
+.history-empty-cell {
+  text-align: center;
+  padding: 28px 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.history-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-expand-row td {
+  background: var(--surface-sunken);
+  padding: 0;
+}
+.history-expand-body {
+  padding: 10px 14px 14px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: history-expand-fade 200ms ease-out;
+}
+@keyframes history-expand-fade {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.history-error-message {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--critical);
+}
+.history-no-detail {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.history-detail-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12.5px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+.history-detail-row:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+.history-detail-id {
+  font-size: 13px;
+}
+.history-detail-name {
+  color: var(--text-secondary);
+}
+.history-detail-segments {
+  color: var(--text-muted);
+}
+.history-change-summary {
+  color: var(--warning);
+  flex-basis: 100%;
+}
+.history-rejection-reasons {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  padding-left: 16px;
+  color: var(--text-secondary);
+}
+
+.history-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+}
+.history-footer-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.history-clear-link {
+  color: #dc2626;
+}
+.history-clear-link:hover {
+  color: #b91c1c;
+}
+
+.pagination-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.pagination-size select {
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  background: var(--surface);
+  color: var(--text-primary);
 }
 
 /* ===== Toast stack ===== */

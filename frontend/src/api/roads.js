@@ -26,10 +26,54 @@ function buildSegmentsParams(filters = {}, sort = {}) {
   return params
 }
 
-export async function uploadExcel(file) {
+export async function previewUpload(file) {
   const formData = new FormData()
   formData.append('file', file)
-  const res = await fetch(`${BASE}/upload`, { method: 'POST', body: formData })
+  const res = await fetch(`${BASE}/upload/preview`, { method: 'POST', body: formData })
+  return handleResponse(res)
+}
+
+export async function commitUpload(token, decisions) {
+  const res = await fetch(`${BASE}/upload/commit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, decisions }),
+  })
+  return handleResponse(res)
+}
+
+export async function cancelUpload(token) {
+  const res = await fetch(`${BASE}/upload/cancel`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  })
+  return handleResponse(res)
+}
+
+function buildUploadLogParams(filters = {}) {
+  const params = new URLSearchParams()
+  if (filters.search) params.set('search', filters.search)
+  if (filters.action) params.set('action', filters.action)
+  if (filters.dateRange) params.set('date_range', filters.dateRange)
+  return params
+}
+
+export async function fetchUploadLog(filters = {}, page = 1, pageSize = 10) {
+  const params = buildUploadLogParams(filters)
+  params.set('page', page)
+  params.set('page_size', pageSize)
+  const res = await fetch(`${BASE}/upload-log?${params.toString()}`)
+  return handleResponse(res)
+}
+
+export function getUploadLogExportUrl(filters = {}) {
+  const params = buildUploadLogParams(filters)
+  return `${BASE}/upload-log/export?${params.toString()}`
+}
+
+export async function clearUploadLog() {
+  const res = await fetch(`${BASE}/upload-log`, { method: 'DELETE' })
   return handleResponse(res)
 }
 

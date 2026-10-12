@@ -73,6 +73,7 @@ export default function RoadInventoryTable({
             onChange={(v) => updateFilter('roadId', v)}
             options={roadOptions}
             ariaLabel="Filter by road"
+            disabled={roads.length === 0}
             searchable
             searchPlaceholder="Search road ID or name…"
             getSearchText={(o) => o.label}
@@ -173,7 +174,9 @@ export default function RoadInventoryTable({
             {records.length === 0 && (
               <tr>
                 <td colSpan={10} className="empty-row">
-                  {hasActiveFilters
+                  {roads.length === 0
+                    ? 'No road data yet. Upload an Excel file to get started.'
+                    : hasActiveFilters
                     ? 'No records match the selected filters.'
                     : 'No data. Upload an Excel file to begin.'}
                 </td>

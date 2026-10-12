@@ -22,6 +22,24 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
+def ensure_schema():
+    """Base.metadata.create_all only creates missing TABLES, not missing
+    COLUMNS on a table that already exists -- so a column added to a model
+    after the live DB file was first created needs an explicit, additive
+    ALTER TABLE here. Safe to call on every startup: each column is only
+    added if it isn't already present."""
+    with engine.connect() as conn:
+        existing_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(roads)").fetchall()}
+        if "source_file" not in existing_cols:
+            conn.exec_driver_sql("ALTER TABLE roads ADD COLUMN source_file TEXT")
+        if "uploaded_at" not in existing_cols:
+            conn.exec_driver_sql("ALTER TABLE roads ADD COLUMN uploaded_at TEXT")
+            # Backfill from updated_at so pre-existing roads have a sensible
+            # "first uploaded" value instead of NULL.
+            conn.exec_driver_sql("UPDATE roads SET uploaded_at = updated_at WHERE uploaded_at IS NULL")
+        conn.commit()
+
+
 def get_db():
     db = SessionLocal()
     try:

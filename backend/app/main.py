@@ -5,10 +5,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse
 
-from app.db import Base, engine
+from app.db import Base, engine, ensure_schema
 from app.routers import roads
 
 Base.metadata.create_all(bind=engine)
+ensure_schema()
 
 app = FastAPI(title="Road Inventory & Surface Diagram System")
 

@@ -14,6 +14,7 @@ import {
   fetchSegmentsPage,
 } from './api/roads'
 import { formatStation, parseStationInput } from './utils/chainage'
+import { readUploadMeta, writeUploadMeta } from './utils/uploadMeta'
 import { showToast } from './components/common/DialogProvider'
 import './App.css'
 
@@ -43,7 +44,11 @@ export default function App() {
   const [diagramVersion, setDiagramVersion] = useState(0)
   const [hasGenerated, setHasGenerated] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [lastUploadAt, setLastUploadAt] = useState(null)
+  // Single source of truth for upload metadata -- both the header's "Last
+  // upload" and the sidebar's "Last file" read this same state, seeded from
+  // localStorage so it survives a refresh (road data itself persists in the
+  // backend DB; this is just the descriptive file name/timestamp).
+  const [uploadMeta, setUploadMeta] = useState(readUploadMeta)
   const [networkSummaryOpen, setNetworkSummaryOpen] = useState(readStoredNetworkSummaryOpen)
 
   async function refreshRoads() {
@@ -112,12 +117,38 @@ export default function App() {
     setTablePage(1)
   }
 
-  async function handleUploaded() {
+  async function handleUploaded(uploadResult, fileName) {
     await refreshRoads()
     setTablePage(1)
     await refreshSegmentsPage(1, tableFilters, tableSort)
     await refreshSummary()
-    setLastUploadAt(new Date())
+    // Saved in the same step as the upload completing, so metadata can never
+    // drift out of sync with whether an upload actually happened.
+    const meta = { fileName, uploadedAt: new Date().toISOString(), rejected: uploadResult.rejected }
+    setUploadMeta(meta)
+    writeUploadMeta(meta)
+
+    // The road currently loaded in "2. Select Road" may have just had its
+    // segments replaced -- refresh its detail so the station range/road name
+    // reflect the new data, but leave the already-drawn diagram alone (it's
+    // now stale) and tell the user to regenerate rather than silently
+    // redrawing it out from under them.
+    const wasReplaced = uploadResult.imported.some(
+      (r) => r.action === 'replaced' && r.road_id === selectedRoadId
+    )
+    if (wasReplaced) {
+      const detail = await fetchRoadDetail(selectedRoadId)
+      setRoadDetail(detail)
+      if (detail.segments.length) {
+        const minM = detail.segments[0].start_m
+        const maxM = detail.segments[detail.segments.length - 1].end_m
+        setRange({ startRaw: formatStation(minM), endRaw: formatStation(maxM) })
+      }
+      showToast({
+        variant: 'info',
+        message: `${selectedRoadId} was updated. Regenerate the diagram to see changes.`,
+      })
+    }
   }
 
   async function handleSelectRoad(roadId) {
@@ -146,15 +177,39 @@ export default function App() {
 
   async function handleDeleteRoad(roadId) {
     await deleteRoad(roadId)
+
+    // Fetch the fresh list directly (rather than relying on the `roads`
+    // state, which won't reflect this delete until the next render) so the
+    // filter-reset decisions below are based on what actually exists now.
+    const freshRoads = await fetchRoadsList()
+    setRoads(freshRoads)
+
     if (roadId === selectedRoadId) {
       setSelectedRoadId('')
       setRoadDetail(null)
       setHasGenerated(false)
+      setGeneratedRange(null)
+      setRange({ startRaw: '', endRaw: '' })
     }
-    await refreshRoads()
+
+    // Clear filters that no longer refer to anything real: all of them once
+    // no roads remain at all, or just the ROAD filter if only the road it
+    // was pointed at got deleted (other roads/filters are left alone).
+    const filteredRoadStillExists = freshRoads.some((r) => r.road_id === tableFilters.roadId)
+    const nextFilters =
+      freshRoads.length === 0
+        ? { roadId: '', status: '', surfaceType: '' }
+        : filteredRoadStillExists
+        ? tableFilters
+        : { ...tableFilters, roadId: '' }
+    setTableFilters(nextFilters)
     setTablePage(1)
-    await refreshSegmentsPage(1, tableFilters, tableSort)
+    await refreshSegmentsPage(1, nextFilters, tableSort)
     await refreshSummary()
+    if (freshRoads.length === 0) {
+      setUploadMeta(null)
+      writeUploadMeta(null)
+    }
     showToast({ variant: 'success', message: `Road ${roadId} deleted` })
   }
 
@@ -174,7 +229,7 @@ export default function App() {
     <div className="app-shell">
       <Header
         summary={networkSummary}
-        lastUploadAt={lastUploadAt}
+        lastUploadAt={uploadMeta ? new Date(uploadMeta.uploadedAt) : null}
         networkSummaryOpen={networkSummaryOpen}
         onToggleNetworkSummary={toggleNetworkSummary}
       />
@@ -196,6 +251,8 @@ export default function App() {
           </button>
           <UploadPanel
             onUploaded={handleUploaded}
+            roads={roads}
+            uploadMeta={uploadMeta}
             collapsed={sidebarCollapsed}
             onExpand={() => setSidebarCollapsed(false)}
           />
