@@ -88,6 +88,50 @@ body {
   color: var(--text-primary);
 }
 
+/* Reserves the scrollbar's width permanently so a modal's scroll lock
+   (body { overflow: hidden }) or short page content never shifts the
+   layout sideways when the scrollbar appears/disappears. */
+html {
+  scrollbar-gutter: stable;
+}
+
+/* Firefox has no ::-webkit-scrollbar support, so it's the only engine that
+   should read the standard scrollbar-color/-width properties below. On
+   Chrome/Edge, setting both the standard properties AND ::-webkit-scrollbar
+   on the same element makes those browsers prefer the standard one and
+   silently drop the webkit pseudo-element styling (the floating thumb,
+   hover/active colors) -- so this is gated to exclude them. */
+@supports not selector(::-webkit-scrollbar) {
+  html {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(37, 99, 235, 0.45) #eef2f7;
+  }
+}
+
+html::-webkit-scrollbar {
+  width: 8px;
+}
+html::-webkit-scrollbar-track {
+  background: #eef2f7;
+}
+html::-webkit-scrollbar-thumb {
+  background: rgba(37, 99, 235, 0.45);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+html::-webkit-scrollbar-thumb:hover {
+  background: #2563eb;
+}
+html::-webkit-scrollbar-thumb:active {
+  background: #1d4ed8;
+}
+html::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 button {
   cursor: pointer;
   font-family: inherit;

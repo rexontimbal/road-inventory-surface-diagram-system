@@ -42,6 +42,9 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
   const [progressKey, setProgressKey] = useState(0)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [hasUnreadLog, setHasUnreadLog] = useState(false)
+  // Intentionally not persisted -- always starts collapsed on page load,
+  // even if the user had it open before refreshing.
+  const [requiredColumnsOpen, setRequiredColumnsOpen] = useState(false)
 
   const timerRef = useRef(null)
   const durationRef = useRef(AUTO_MINIMIZE_AFTER_UPLOAD_MS)
@@ -67,6 +70,10 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
   useEffect(() => {
     checkUnreadLog()
   }, [])
+
+  function toggleRequiredColumns() {
+    setRequiredColumnsOpen((prev) => !prev)
+  }
 
   function requestPersistentStorageOnce() {
     if (persistRequestedRef.current) return
@@ -221,6 +228,12 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
     } catch (err) {
       setError(err.message)
       setUploading(false)
+      // A missing/misnamed column is a file-level problem the user can only
+      // fix by checking the reference list -- surface it automatically
+      // instead of making them hunt for the (collapsed-by-default) toggle.
+      if (/missing required column/i.test(err.message)) {
+        setRequiredColumnsOpen(true)
+      }
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
@@ -526,12 +539,36 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
       )}
 
       <div className="required-columns">
-        <p>Required columns:</p>
-        <ul>
-          {REQUIRED_COLUMNS.map((c) => (
-            <li key={c}>{c}</li>
-          ))}
-        </ul>
+        <button
+          type="button"
+          className="required-columns-toggle"
+          aria-expanded={requiredColumnsOpen}
+          aria-controls="required-columns-list"
+          onClick={toggleRequiredColumns}
+        >
+          <span className="required-columns-toggle-left">
+            Required columns
+            <span className="required-columns-count">{REQUIRED_COLUMNS.length}</span>
+          </span>
+          <span
+            className={`required-columns-chevron${requiredColumnsOpen ? ' required-columns-chevron-open' : ''}`}
+            aria-hidden="true"
+          >
+            ▾
+          </span>
+        </button>
+        <div
+          id="required-columns-list"
+          className={`required-columns-collapse${requiredColumnsOpen ? ' required-columns-collapse-open' : ''}`}
+        >
+          <div className="required-columns-collapse-inner">
+            <ul>
+              {REQUIRED_COLUMNS.map((c) => (
+                <li key={c}>{c}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
       </div>
       </div>
 

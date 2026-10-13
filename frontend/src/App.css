@@ -17,10 +17,16 @@
 }
 
 /* Reusable thin, blue-tinted scrollbar for scrollable panels throughout
-   the app (upload summary, inventory table, diagram wrap, chip rows). */
-.thin-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(37, 99, 235, 0.45) transparent;
+   the app (upload summary, inventory table, diagram wrap, chip rows).
+   The scrollbar-width/-color pair below is gated to browsers without
+   ::-webkit-scrollbar support (i.e. Firefox) -- on Chrome/Edge, having
+   both set on the same element makes the standard property win and the
+   webkit pseudo-element rules below get silently ignored. */
+@supports not selector(::-webkit-scrollbar) {
+  .thin-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(37, 99, 235, 0.45) transparent;
+  }
 }
 .thin-scroll::-webkit-scrollbar {
   width: 6px;
@@ -935,21 +941,70 @@ button:focus-visible {
 
 .required-columns {
   margin-top: 14px;
-  padding-top: 14px;
+  padding-top: 10px;
   border-top: 1px solid var(--border);
   font-size: 0.74rem;
   color: var(--text-muted);
 }
-.required-columns p {
-  margin: 0 0 4px;
+.required-columns-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 4px 6px;
+  margin: 0 -6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  font-size: 0.74rem;
   font-weight: 600;
   color: var(--text-secondary);
+  text-align: left;
 }
-.required-columns ul {
-  margin: 0;
+.required-columns-toggle:hover {
+  background: var(--surface-sunken);
+}
+.required-columns-toggle-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.required-columns-count {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+.required-columns-chevron {
+  display: inline-block;
+  color: var(--text-muted);
+  transition: transform 200ms ease;
+}
+.required-columns-chevron-open {
+  transform: rotate(180deg);
+}
+.required-columns-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 250ms ease-out, opacity 250ms ease-out;
+}
+.required-columns-collapse-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.required-columns-collapse-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+.required-columns-collapse ul {
+  margin: 8px 0 0;
   padding-left: 18px;
 }
-.required-columns li {
+.required-columns-collapse li {
   margin-bottom: 2px;
 }
 
