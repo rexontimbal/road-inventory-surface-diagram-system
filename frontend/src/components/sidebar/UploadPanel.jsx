@@ -3,11 +3,6 @@ import { cancelUpload, commitUpload, fetchUploadLog, previewUpload } from '../..
 import { commitRestore, exportBackup, previewRestore } from '../../api/backup'
 import { showAlert, showToast } from '../common/DialogProvider'
 import { readLastSeenLogId } from '../../utils/uploadLogSeen'
-import {
-  dismissBackupReminder,
-  shouldShowBackupReminder,
-  writeLastBackupAt,
-} from '../../utils/backupReminder'
 import UploadConflictModal from './UploadConflictModal'
 import UploadHistoryModal from './UploadHistoryModal'
 import RestoreBackupModal from './RestoreBackupModal'
@@ -35,7 +30,6 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
   const [error, setError] = useState('')
   const [backingUp, setBackingUp] = useState(false)
   const [pendingRestore, setPendingRestore] = useState(null)
-  const [showBackupReminder, setShowBackupReminder] = useState(false)
   const persistRequestedRef = useRef(false)
   // Set only when the preview finds Road-ID conflicts -- holds the preview
   // response + file name until the user resolves the modal (or cancels).
@@ -74,11 +68,6 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
     checkUnreadLog()
   }, [])
 
-  // Only worth nagging about once there's actually something to lose.
-  useEffect(() => {
-    setShowBackupReminder(!!roads && roads.length > 0 && shouldShowBackupReminder())
-  }, [roads])
-
   function requestPersistentStorageOnce() {
     if (persistRequestedRef.current) return
     persistRequestedRef.current = true
@@ -105,8 +94,6 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
       a.download = filename
       a.click()
       URL.revokeObjectURL(url)
-      writeLastBackupAt(now)
-      setShowBackupReminder(false)
       showToast({
         variant: 'success',
         message: `Backup saved (${backup.counts.roads} road${backup.counts.roads !== 1 ? 's' : ''}, ${backup.counts.segments.toLocaleString()} segments)`,
@@ -116,11 +103,6 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
     } finally {
       setBackingUp(false)
     }
-  }
-
-  function handleBackupReminderDismiss() {
-    dismissBackupReminder()
-    setShowBackupReminder(false)
   }
 
   async function handleRestoreFileChange(e) {
@@ -412,20 +394,6 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
           onChange={handleRestoreFileChange}
         />
       </div>
-
-      {showBackupReminder && (
-        <div className="backup-reminder-banner">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M12 9v4m0 4h.01M10.3 3.9 2.6 17.5a1.5 1.5 0 0 0 1.3 2.3h16.2a1.5 1.5 0 0 0 1.3-2.3L13.7 3.9a1.5 1.5 0 0 0-2.6 0Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <span>
-            No backup in 7 days. <button type="button" className="btn-link backup-reminder-link" onClick={handleBackup}>Backup data</button>
-          </span>
-          <button type="button" className="backup-reminder-dismiss" aria-label="Dismiss" onClick={handleBackupReminderDismiss}>
-            ×
-          </button>
-        </div>
-      )}
 
       {error && (
         <div className="feedback-card feedback-critical">

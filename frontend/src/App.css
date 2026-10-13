@@ -933,49 +933,6 @@ button:focus-visible {
   flex: 1;
 }
 
-.backup-reminder-banner {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 10px;
-  padding: 7px 10px;
-  border-radius: 6px;
-  background: var(--warning-soft);
-  border: 1px solid var(--warning-border);
-  color: var(--warning);
-  font-size: 11.5px;
-}
-.backup-reminder-banner svg {
-  flex-shrink: 0;
-}
-.backup-reminder-banner span {
-  flex: 1;
-  min-width: 0;
-}
-.backup-reminder-link {
-  color: var(--warning);
-  font-weight: 700;
-  text-decoration: underline;
-}
-.backup-reminder-link:hover {
-  color: var(--warning);
-}
-.backup-reminder-dismiss {
-  flex-shrink: 0;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--warning);
-  font-size: 14px;
-  line-height: 1;
-}
-.backup-reminder-dismiss:hover {
-  background: none;
-  opacity: 0.7;
-}
-
 .required-columns {
   margin-top: 14px;
   padding-top: 14px;

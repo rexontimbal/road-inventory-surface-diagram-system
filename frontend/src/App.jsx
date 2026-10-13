@@ -74,6 +74,18 @@ export default function App() {
     refreshSummary()
   }, [])
 
+  // One-time cleanup of keys left behind by the retired "No backup in 7
+  // days" reminder banner -- the feature is gone, but browsers that saw it
+  // before still have these in localStorage.
+  useEffect(() => {
+    try {
+      localStorage.removeItem('ris.lastBackupAt')
+      localStorage.removeItem('ris.backupReminderDismissedAt')
+    } catch {
+      // localStorage unavailable -- nothing to clean up
+    }
+  }, [])
+
   function toggleNetworkSummary() {
     setNetworkSummaryOpen((prev) => {
       const next = !prev
