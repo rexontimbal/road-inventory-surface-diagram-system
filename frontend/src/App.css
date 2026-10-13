@@ -1365,56 +1365,84 @@ button:focus-visible {
   border-radius: var(--radius-sm);
 }
 .sortable-th {
-  cursor: pointer;
   user-select: none;
   white-space: nowrap;
 }
 .sortable-th:hover {
-  color: #ffffff;
   background: #1c212c;
 }
-/* Wraps the label + sort icon so they're guaranteed to stay on one line
-   side by side (flex row) regardless of the <th>'s own table-cell layout --
-   setting display:inline-flex directly on a <th> would break its column
-   sizing, so it goes on this inner span instead. */
-.th-content {
+/* Wraps the label (+ for sortable columns, the SortIcon svg) so they're
+   guaranteed to stay on one line side by side (flex row) regardless of the
+   <th>'s own table-cell layout -- setting display:inline-flex directly on a
+   <th> would break its column sizing, so it goes on this inner element
+   instead. .th-sort is a real <button> (sortable columns, clickable); plain
+   non-sortable headers ("#") use the non-interactive .th-content span. */
+.th-content,
+.th-sort {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  max-width: 100%;
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+}
+.th-sort {
+  cursor: pointer;
+}
+/* Specificity note: the generic button:hover rule (App.css "Unified button
+   system") would otherwise win on hover -- it's a type+pseudo selector,
+   which beats .th-sort's single class -- and paint this button with the
+   default light button hover (gray background, dark text) instead of
+   staying transparent over the header's own dark hover background
+   (.sortable-th:hover, above). .th-sort:hover (class+pseudo) has enough
+   specificity to override it correctly. */
+.th-sort:hover {
+  background: none;
+  border-color: transparent;
+  color: inherit;
 }
 .th-label {
   vertical-align: middle;
 }
-.sort-icon {
-  display: inline-block;
-  margin-left: 4px;
-  font-size: 0.75em;
-  color: rgba(255, 255, 255, 0.4);
-  vertical-align: middle;
+.sort-icon-svg {
+  flex-shrink: 0;
+  color: #94a3b8;
 }
-.sort-icon-active {
-  color: #60a5fa;
+.sort-icon-svg-active {
+  color: #ffffff;
+}
+.sortable-th:hover .sort-icon-svg {
+  color: #e2e8f0;
 }
 
-/* No max-height / vertical scroll here anymore -- the box grows to fit
-   every row on the page (10 by default) and the PAGE scrolls if that's
-   ever too tall, rather than this one inner box getting its own scrollbar.
-   Horizontal-only: overflow-x:auto so .table-scroll still scrolls
-   sideways when TABLE_MIN_WIDTH (RoadInventoryTable.jsx) is wider than the
-   container, but never clips/scrolls vertically. */
+/* Natural (table-layout: auto, the default -- not set explicitly) column
+   sizing, restored to match the deployed version: every column sizes from
+   its own header label + cell content, same as the plain HTML table
+   default, rather than a hand-tuned px/percentage budget. table{width:100%}
+   below still applies, but auto-layout treats that as a minimum, not a cap
+   -- if content genuinely needs more, the table (and .table-scroll's own
+   overflow-x) grows past 100% instead of squeezing anything. */
+
+/* No max-height / vertical scroll here -- the box grows to fit every row on
+   the page (10 by default) and the PAGE scrolls if that's ever too tall,
+   rather than this one inner box getting its own scrollbar. Horizontal-only
+   so .table-scroll still scrolls sideways on a narrow screen, but never
+   clips/scrolls vertically. */
 .inventory-table .table-scroll {
   overflow-x: auto;
   overflow-y: visible;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
 }
-/* Not sticky anymore -- with no vertical scroll left inside .table-scroll
-   (above), there's nothing for a sticky header to stick against; it would
-   be fully inert at best and risk the exact floating-header bug from
-   before at worst (position:sticky still establishes a containing block
-   per its own computed overflow, independent of whether anything actually
-   scrolls). A plain static header is simpler and behaves identically in
-   the one case that matters here (no internal scroll). */
+/* Not sticky -- with no vertical scroll inside .table-scroll (above),
+   there's nothing for a sticky header to stick against; it would be inert
+   at best and risk a floating-header bug at worst (position:sticky still
+   establishes a containing block per its own computed overflow, regardless
+   of whether anything actually scrolls). */
 .inventory-table thead th {
   position: static;
 }
@@ -1423,25 +1451,6 @@ button:focus-visible {
    for the sticky-right override). */
 .inventory-table thead th:first-child {
   border-top-left-radius: var(--radius-sm);
-}
-/* table-layout: fixed + the <colgroup> in RoadInventoryTable.jsx is what
-   actually guarantees column widths never move: under the default "auto"
-   layout, a column's width is recalculated from whatever its widest cell's
-   content currently needs, so swapping plain text for an edit input (wider)
-   on just ONE row could resize that column -- and since it's one column
-   shared by every row, that shift was visible on every OTHER row too, not
-   just the one being edited. Fixed layout ignores cell content for sizing
-   entirely; only the <colgroup>/<table> widths matter. The table itself is
-   width:100% + min-width:TABLE_MIN_WIDTH (both inline, from JS) rather than
-   one flat px value -- Road Name is the only column with no fixed width in
-   the colgroup, so it's the one that absorbs whatever space is left once
-   the table is stretched to 100% of a container wider than the minimum,
-   which is what makes the table (and its header) actually reach the card's
-   full width instead of stopping short with a gap on the right. Below the
-   minimum, .table-scroll scrolls horizontally instead of compressing any
-   column further. */
-.inventory-table table {
-  table-layout: fixed;
 }
 table {
   width: 100%;
@@ -1467,40 +1476,32 @@ td {
 .inventory-table table td:nth-child(3) {
   text-align: left;
 }
-/* Tighter horizontal padding + compact widths on the columns that don't
-   need much room, so the table's natural width stays close to common
-   viewport widths (1366px+) and horizontal scroll is rarely needed.
-   Position-coupled to the COLUMNS array order in RoadInventoryTable.jsx
-   (# / Road ID / Road Name / Start / End / Lanes / Surface / Left / Right /
-   Status / actions) -- keep both in sync if columns are reordered. */
-.inventory-table table th,
-.inventory-table table td {
-  padding: 9px 10px;
+/* Floors only for the columns an edit control could otherwise widen --
+   Number of Lanes (a 56px-max number input) and the three surface/shoulder
+   CustomSelect triggers. Under auto layout this just raises that column's
+   minimum; it doesn't cap anything, so a wider header label still wins if
+   it needs more. Position-coupled to the COLUMNS array order in
+   RoadInventoryTable.jsx (# / Road ID / Road Name / Start / End / Lanes /
+   Surface / Left / Right / Status / actions) -- keep both in sync if
+   columns are reordered. */
+.inventory-table table th:nth-child(6),
+.inventory-table table td:nth-child(6) {
+  min-width: 76px;
 }
-/* Short labels (see COLUMNS in RoadInventoryTable.jsx: "Lanes", "Surface",
-   "Left Shldr", ...) + nowrap + a slightly smaller size keep every header
-   on one line at any width -- the full name is still available via the
-   header's title tooltip. */
-.inventory-table thead th {
-  white-space: nowrap;
-  font-size: 12px;
+.inventory-table table th:nth-child(7),
+.inventory-table table td:nth-child(7),
+.inventory-table table th:nth-child(8),
+.inventory-table table td:nth-child(8),
+.inventory-table table th:nth-child(9),
+.inventory-table table td:nth-child(9) {
+  min-width: 128px;
 }
-/* Column widths now come entirely from the <colgroup> (RoadInventoryTable.jsx
-   COLUMNS) under table-layout: fixed -- this just handles the Road Name
-   column's overflow behavior within whatever width it ends up absorbing
-   (ellipsis + a title tooltip in JS for the full name). */
-.inventory-table table th:nth-child(3),
-.inventory-table table td:nth-child(3) {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-/* Optional below 1280px: the "#" row-index column is the least useful one
-   to keep on a cramped screen. */
-@media (max-width: 1279px) {
-  .inventory-table table th:nth-child(1),
-  .inventory-table table td:nth-child(1) {
-    display: none;
-  }
+/* Status badge ("✕ Incomplete") is the one column directly beside the
+   sticky actions column -- a floor here is what keeps Actions from ever
+   visually overlapping it while the table is mid-scroll. */
+.inventory-table table th:nth-child(10),
+.inventory-table table td:nth-child(10) {
+  min-width: 118px;
 }
 thead th {
   background: #10131a;
@@ -1526,10 +1527,14 @@ tbody tr:last-child td {
 
 /* Inline row editing */
 .row-actions-cell {
-  /* Width comes from the <colgroup> now (96px, fixed, same as every other
-     column) -- one constant size for both the pencil (normal mode) and
-     Save+Cancel (edit mode), so entering/leaving edit never resizes this
-     column either. */
+  /* Explicit and fixed (not table-layout:auto's own shrink-to-content,
+     which previously let this column size below its own Save+Cancel
+     buttons' actual width, or let Status next to it claim the space
+     instead). One constant size for both the pencil (normal mode) and
+     Save+Cancel (edit mode), so entering/leaving edit never resizes it. */
+  width: 84px;
+  min-width: 84px;
+  max-width: 84px;
   padding: 4px;
   white-space: nowrap;
   /* Sticky on the right so the edit/Save/Cancel controls are never pushed
@@ -1558,6 +1563,9 @@ tbody tr:hover .row-actions-cell {
    .table-scroll's own corner so the header's square cell doesn't show a
    gap/mismatch against the wrapper's rounded top-right corner. */
 .inventory-table thead th.row-actions-header-cell {
+  width: 84px;
+  min-width: 84px;
+  max-width: 84px;
   padding: 4px;
   position: sticky;
   right: 0;
@@ -1565,10 +1573,9 @@ tbody tr:hover .row-actions-cell {
   background: #10131a;
   border-top-right-radius: var(--radius-sm);
 }
-/* Just centers whichever control(s) are currently inside the (always-96px)
+/* Just centers whichever control(s) are currently inside the (always-84px)
    actions cell -- the pencil alone in normal mode, Save+Cancel side by side
-   in edit mode. No width of its own; the column's fixed width already
-   comes from the <colgroup>. */
+   in edit mode. */
 .row-actions-inner {
   display: inline-flex;
   align-items: center;

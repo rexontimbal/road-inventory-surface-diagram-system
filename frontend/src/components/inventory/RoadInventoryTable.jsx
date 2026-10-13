@@ -8,6 +8,35 @@ import { showToast } from '../common/DialogProvider'
 // Matches .app-header-spacer in App.css (the fixed app header's height).
 const APP_HEADER_HEIGHT = 72
 
+// A real vector shape, not a unicode glyph (↕ ▲ ▼) -- those could fall back
+// to a color-emoji font on Windows/Chrome, which bakes in its own colors
+// (CSS `color` can't override a color-glyph) and can render at a different
+// box size than a plain text character, which is what was both coloring the
+// icons randomly and shifting/clipping the header labels next to them.
+// fill="currentColor" on an SVG path is immune to that -- it's a shape, not
+// a character, so there's no font/glyph substitution to go wrong.
+function SortIcon({ active, dir }) {
+  if (active) {
+    return (
+      <svg
+        className="sort-icon-svg sort-icon-svg-active"
+        width="10"
+        height="10"
+        viewBox="0 0 10 10"
+        aria-hidden="true"
+      >
+        {dir === 'asc' ? <path d="M5 1.5 8.5 7h-7Z" fill="currentColor" /> : <path d="M5 8.5 1.5 3h7Z" fill="currentColor" />}
+      </svg>
+    )
+  }
+  return (
+    <svg className="sort-icon-svg" width="10" height="12" viewBox="0 0 10 12" aria-hidden="true">
+      <path d="M5 0 8 3.2H2Z" fill="currentColor" />
+      <path d="M5 12 2 8.8h6Z" fill="currentColor" />
+    </svg>
+  )
+}
+
 const SURFACE_TYPE_OPTIONS = ['unpaved', 'paved', 'gravel', 'asphalt']
 const SURFACE_EDIT_OPTIONS = SURFACE_TYPE_OPTIONS.map((s) => ({
   value: s,
@@ -29,40 +58,28 @@ const STATUS_OPTIONS = [
   { value: 'Incomplete', label: 'Incomplete' },
 ]
 
-// label is the short, always-one-line form shown in the header at every
-// width; fullLabel (when present) is the complete name, shown only in the
-// header cell's title tooltip. width drives a <colgroup> under
-// table-layout: fixed, so every column (including Actions) has one constant
-// width regardless of content -- entering/leaving edit mode changes what's
-// INSIDE a cell, never the column itself, so nothing shifts. Road Name is
-// the one column with no width: under table-layout: fixed that's defined
-// (not ambiguous) to mean "whatever's left of the table's own width after
-// every other column's" -- it's what makes the table reach 100% of its
-// container on wide screens instead of leaving a gap, since it's the only
-// column that grows/shrinks with the table itself.
+// Full labels, natural (table-layout: auto) sizing -- restored to match the
+// deployed version after several passes of colgroup/table-layout:fixed
+// experiments made the header worse (percentages that didn't visually
+// balance, left-aligned columns with a lopsided gap after a short label,
+// etc). Column widths are no longer hand-tuned pixel/percentage budgets --
+// the browser sizes each one from its own header label + cell content,
+// which is what actually keeps every label fully readable at any width.
+// The handful of columns that still need a floor (so an edit control can't
+// widen them) get a plain CSS min-width instead -- see App.css.
 const COLUMNS = [
-  { label: '#', key: null, width: 36 },
-  { label: 'Road ID', key: 'road_id', width: 84 },
+  { label: '#', key: null },
+  { label: 'ROAD ID', key: 'road_id' },
   { label: 'Road Name', key: 'road_name' },
-  { label: 'Start', fullLabel: 'Start Station', key: 'start_station', width: 72 },
-  { label: 'End', fullLabel: 'End Station', key: 'end_station', width: 72 },
-  { label: 'Lanes', fullLabel: 'Number of Lanes', key: 'num_lanes', width: 60 },
-  { label: 'Surface', fullLabel: 'Surface Type', key: 'surface_type', width: 92 },
-  { label: 'Left Shldr', fullLabel: 'Left Shoulder', key: 'shoulder_left', width: 92 },
-  { label: 'Right Shldr', fullLabel: 'Right Shoulder', key: 'shoulder_right', width: 92 },
-  { label: 'Status', key: 'status', width: 116 },
-  { label: '', key: null, width: 96 },
+  { label: 'Start Station', key: 'start_station' },
+  { label: 'End Station', key: 'end_station' },
+  { label: 'Number of Lanes', key: 'num_lanes' },
+  { label: 'Surface Type', key: 'surface_type' },
+  { label: 'Left Shoulder', key: 'shoulder_left' },
+  { label: 'Right Shoulder', key: 'shoulder_right' },
+  { label: 'Status', key: 'status' },
+  { label: '', key: null },
 ]
-// Road Name's own practical floor -- table min-width is every OTHER
-// column's fixed width plus this, so the table can always shrink that far
-// (Road Name getting tight) before .table-scroll takes over with a
-// horizontal scrollbar instead of compressing any column further. Trimmed
-// from the previous pass's budget (~1134px total) to ~942px, which fits a
-// 1366px window with the sidebar expanded (sidebar 300px + gaps/padding
-// ~360px, leaving ~950-1000px for the table) -- still comfortable at
-// 1920px or with the sidebar collapsed.
-const ROAD_NAME_MIN_WIDTH = 130
-const TABLE_MIN_WIDTH = COLUMNS.reduce((sum, c) => sum + (c.width || 0), 0) + ROAD_NAME_MIN_WIDTH
 
 export default function RoadInventoryTable({
   segmentsPage,
@@ -163,10 +180,10 @@ export default function RoadInventoryTable({
       shoulder_left: r.shoulder_left,
       shoulder_right: r.shoulder_right,
     })
-    // Every column (Actions included) has a fixed width via <colgroup> now,
-    // so entering edit mode never changes the table's scrollWidth -- one
-    // frame is just to let the edit inputs themselves mount before reading
-    // layout, not to wait out any animation.
+    // The editable columns (Lanes/Surface/Shoulders) have a CSS min-width
+    // matching their edit field's own size (App.css), so entering edit mode
+    // shouldn't change the table's scrollWidth in practice -- one frame is
+    // just to let the edit inputs themselves mount before reading layout.
     requestAnimationFrame(() => {
       scrollEditedRowIntoView(r.id)
     })
@@ -338,30 +355,23 @@ export default function RoadInventoryTable({
         ref={tableScrollRef}
         onScroll={handleTableScroll}
       >
-        <table style={{ width: '100%', minWidth: TABLE_MIN_WIDTH }}>
-          <colgroup>
-            {COLUMNS.map((col, i) => (
-              <col key={col.label || `col-${i}`} style={col.width ? { width: col.width } : undefined} />
-            ))}
-          </colgroup>
+        <table>
           <thead>
             <tr>
               {COLUMNS.map((col, i) => (
                 <th
                   key={col.label || `col-${i}`}
                   className={`${col.key ? 'sortable-th' : ''}${i === COLUMNS.length - 1 ? ' row-actions-header-cell' : ''}`}
-                  onClick={col.key ? () => onSortChange(col.key) : undefined}
                   aria-sort={col.key ? sortAriaValue(col.key) : undefined}
-                  title={col.fullLabel || undefined}
                 >
-                  {i === COLUMNS.length - 1 ? null : (
+                  {i === COLUMNS.length - 1 ? null : col.key ? (
+                    <button type="button" className="th-sort" onClick={() => onSortChange(col.key)}>
+                      <span className="th-label">{col.label}</span>
+                      <SortIcon active={sort.sortBy === col.key} dir={sort.sortDir} />
+                    </button>
+                  ) : (
                     <span className="th-content">
                       <span className="th-label">{col.label}</span>
-                      {col.key && (
-                        <span className={`sort-icon${sort.sortBy === col.key ? ' sort-icon-active' : ''}`} aria-hidden="true">
-                          {sort.sortBy === col.key ? (sort.sortDir === 'asc' ? '▲' : '▼') : '↕'}
-                        </span>
-                      )}
                     </span>
                   )}
                 </th>
