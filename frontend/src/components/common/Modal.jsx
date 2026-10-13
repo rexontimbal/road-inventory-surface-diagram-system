@@ -1,4 +1,6 @@
 import { useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
+import { useModalLayer } from './useModalLayer'
 
 const ICONS = {
   danger: (
@@ -35,6 +37,7 @@ export default function Modal({
   const confirmBtnRef = useRef(null)
   const cancelBtnRef = useRef(null)
   const triggerElRef = useRef(null)
+  const { zIndex, isTop } = useModalLayer()
 
   useEffect(() => {
     triggerElRef.current = document.activeElement
@@ -48,6 +51,10 @@ export default function Modal({
     initialFocusEl?.focus()
 
     function handleKeyDown(e) {
+      // A modal opened on top of this one (e.g. a confirm triggered from
+      // within an already-open modal) is still mounted underneath -- only
+      // the top-most modal should react to Esc/Tab.
+      if (!isTop()) return
       if (e.key === 'Escape') {
         e.preventDefault()
         onCancel()
@@ -77,9 +84,12 @@ export default function Modal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  return (
+  if (zIndex == null) return null
+
+  return createPortal(
     <div
       className="modal-backdrop no-print"
+      style={{ zIndex }}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onCancel()
       }}
@@ -118,6 +128,7 @@ export default function Modal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

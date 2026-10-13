@@ -108,6 +108,18 @@ export default function DialogProvider({ children }) {
               {TOAST_ICONS[t.variant] || TOAST_ICONS.info}
             </span>
             <span className="toast-message">{t.message}</span>
+            {t.actionLabel && (
+              <button
+                type="button"
+                className="toast-action"
+                onClick={() => {
+                  t.onAction?.()
+                  dismissToast(t.id)
+                }}
+              >
+                {t.actionLabel}
+              </button>
+            )}
             <button type="button" className="toast-close" onClick={() => dismissToast(t.id)} aria-label="Dismiss">
               ×
             </button>

@@ -5,6 +5,7 @@ import Pagination from '../inventory/Pagination'
 import { clearUploadLog, fetchUploadLog, getUploadLogExportUrl } from '../../api/roads'
 import { showConfirm, showToast } from '../common/DialogProvider'
 import { writeLastSeenLogId } from '../../utils/uploadLogSeen'
+import { useModalLayer } from '../common/useModalLayer'
 
 const ACTION_OPTIONS = [
   { value: 'all', label: 'All actions' },
@@ -12,6 +13,8 @@ const ACTION_OPTIONS = [
   { value: 'replaced', label: 'Replaced' },
   { value: 'kept_existing', label: 'Kept existing' },
   { value: 'up_to_date', label: 'Up to date' },
+  { value: 'edited', label: 'Edited' },
+  { value: 'restored', label: 'Restored' },
   { value: 'rejected', label: 'Rejected' },
   { value: 'deleted', label: 'Deleted' },
 ]
@@ -28,6 +31,7 @@ const ACTION_LABELS = {
   replaced: 'Replaced',
   kept_existing: 'Kept existing',
   up_to_date: 'Up to date',
+  edited: 'Edited',
   rejected: 'Rejected',
   deleted: 'Deleted',
 }
@@ -37,6 +41,7 @@ const ACTION_BADGE_CLASS = {
   replaced: 'replaced',
   kept_existing: 'skipped',
   up_to_date: 'up_to_date',
+  edited: 'edited',
   rejected: 'rejected',
   deleted: 'rejected',
 }
@@ -49,6 +54,24 @@ function formatDateTime(iso) {
   const date = d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
   const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
   return `${date} · ${time}`
+}
+
+// Restore entries store "Backup from <raw iso>" as file_name (set server-side
+// at commit time) -- reformat the embedded timestamp the same way the log's
+// own Date & time column reads, instead of showing the raw ISO string.
+const BACKUP_FILE_PREFIX = 'Backup from '
+function formatFileCell(entry) {
+  if (entry.kind === 'restore' && entry.file_name?.startsWith(BACKUP_FILE_PREFIX)) {
+    const raw = entry.file_name.slice(BACKUP_FILE_PREFIX.length)
+    const formatted = formatDateTime(raw)
+    if (formatted !== raw) return `${BACKUP_FILE_PREFIX}${formatted}`
+  }
+  return entry.file_name || '—'
+}
+
+function restoredRoadsLabel(entry) {
+  const total = (entry.added_count || 0) + (entry.replaced_count || 0)
+  return `${total} road${total !== 1 ? 's' : ''} restored`
 }
 
 function summaryBadges(entry) {
@@ -87,6 +110,7 @@ export default function UploadHistoryModal({ onClose, triggerRef }) {
 
   const cardRef = useRef(null)
   const firstFocusableRef = useRef(null)
+  const { zIndex, isTop } = useModalLayer()
 
   // Debounce the search box so typing doesn't fire a request per keystroke.
   useEffect(() => {
@@ -132,6 +156,7 @@ export default function UploadHistoryModal({ onClose, triggerRef }) {
     firstFocusableRef.current?.focus()
 
     function handleKeyDown(e) {
+      if (!isTop()) return
       if (e.key === 'Escape') {
         e.preventDefault()
         onClose()
@@ -192,9 +217,12 @@ export default function UploadHistoryModal({ onClose, triggerRef }) {
 
   const exportUrl = getUploadLogExportUrl({ search, action, dateRange })
 
+  if (zIndex == null) return null
+
   return createPortal(
     <div
       className="modal-backdrop no-print"
+      style={{ zIndex }}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
@@ -318,13 +346,25 @@ export default function UploadHistoryModal({ onClose, triggerRef }) {
                     <Fragment key={entry.id}>
                       <tr className="history-row" onClick={() => toggleExpand(entry.id)}>
                         <td className="history-cell-nowrap">{formatDateTime(entry.timestamp)}</td>
-                        <td className="history-cell-file" title={entry.file_name || ''}>
-                          {entry.file_name || '—'}
+                        <td className="history-cell-file" title={formatFileCell(entry)}>
+                          {formatFileCell(entry)}
                         </td>
                         <td>
                           <div className="history-badge-row">
                             {entry.status === 'cancelled' ? (
                               <span className="upload-summary-badge upload-summary-badge-skipped">No changes applied</span>
+                            ) : entry.kind === 'edit' ? (
+                              <>
+                                <span className="upload-summary-badge upload-summary-badge-edited">Edited</span>
+                                {entry.details[0]?.change_summary && (
+                                  <span className="history-change-summary">{entry.details[0].change_summary}</span>
+                                )}
+                              </>
+                            ) : entry.kind === 'restore' ? (
+                              <>
+                                <span className="upload-summary-badge upload-summary-badge-restored">Restored</span>
+                                <span className="history-change-summary">{restoredRoadsLabel(entry)}</span>
+                              </>
                             ) : (
                               summaryBadges(entry).map((b) => (
                                 <span key={b.key} className={`upload-summary-badge upload-summary-badge-${ACTION_BADGE_CLASS[b.key]}`}>

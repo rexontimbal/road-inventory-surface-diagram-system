@@ -11,7 +11,7 @@ from starlette.responses import StreamingResponse
 
 from app.db import get_db
 from app.excel_import import ImportResult, TemplateError, parse_upload
-from app.models import Road, RoadSegment, UploadLogEntry  # noqa: F401 -- UploadLogEntry import registers the table for create_all
+from app.models import SURFACE_TYPES, Road, RoadSegment, UploadLogEntry  # noqa: F401 -- UploadLogEntry import registers the table for create_all
 from app.schemas import (
     NetworkSummary,
     RoadDetail,
@@ -23,6 +23,9 @@ from app.schemas import (
     RoadSummary,
     RoadSummaryStat,
     RowErrorOut,
+    SegmentEditIn,
+    SegmentEditOut,
+    SegmentFieldChange,
     SegmentOut,
     SegmentRecord,
     SegmentsPage,
@@ -62,10 +65,15 @@ _STATUS_RANK = case((RoadSegment.surface_type == "asphalt", 1), else_=0)
 _SORT_COLUMNS = {
     "road_id": RoadSegment.road_id,
     "road_name": Road.road_name,
+    # Sorted on the parsed integer-meters columns, not the raw "K+MMM" text,
+    # so stations order numerically (2+000 before 10+000) rather than
+    # lexically (where "10+000" would sort before "2+000").
     "start_station": RoadSegment.start_m,
     "end_station": RoadSegment.end_m,
     "num_lanes": RoadSegment.num_lanes,
     "surface_type": RoadSegment.surface_type,
+    "shoulder_left": RoadSegment.shoulder_left,
+    "shoulder_right": RoadSegment.shoulder_right,
     "status": _STATUS_RANK,
 }
 
@@ -393,6 +401,7 @@ def list_segments(
 
     records = [
         SegmentRecord(
+            id=seg.id,
             index=(page - 1) * page_size + i + 1,
             road_id=seg.road_id,
             road_name=road_name,
@@ -413,6 +422,87 @@ def list_segments(
         total_pages=total_pages,
         total_records=total_records,
         records=records,
+    )
+
+
+_EDITABLE_FIELD_LABELS = {
+    "num_lanes": "Number of Lanes",
+    "surface_type": "Surface Type",
+    "shoulder_left": "Left Shoulder",
+    "shoulder_right": "Right Shoulder",
+}
+
+
+@router.patch("/segments/{segment_id}", response_model=SegmentEditOut)
+def edit_segment(segment_id: int, body: SegmentEditIn, db: Session = Depends(get_db)):
+    """Inline table edit for a single segment -- stations are intentionally
+    not editable here (that risks creating gaps/overlaps with neighboring
+    segments; those still require a full Excel re-upload). Any actual change
+    bumps the parent road's updated_at and writes one 'edit' log entry so
+    there's an audit trail, same as every other data-changing action."""
+    seg = db.query(RoadSegment).filter(RoadSegment.id == segment_id).first()
+    if seg is None:
+        raise HTTPException(status_code=404, detail="Segment not found")
+    road = db.query(Road).filter(Road.road_id == seg.road_id).first()
+
+    if body.num_lanes is not None and not (1 <= body.num_lanes <= 12):
+        raise HTTPException(status_code=400, detail="Number of Lanes must be between 1 and 12")
+    for field_name in ("surface_type", "shoulder_left", "shoulder_right"):
+        value = getattr(body, field_name)
+        if value is not None and value not in SURFACE_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{_EDITABLE_FIELD_LABELS[field_name]} must be one of {sorted(SURFACE_TYPES)}",
+            )
+
+    changes: list[SegmentFieldChange] = []
+    change_dicts: list[dict] = []
+    for field_name, label in _EDITABLE_FIELD_LABELS.items():
+        new_value = getattr(body, field_name)
+        if new_value is None:
+            continue
+        old_value = getattr(seg, field_name)
+        if str(new_value) == str(old_value):
+            continue
+        setattr(seg, field_name, new_value)
+        changes.append(SegmentFieldChange(field=label, old=str(old_value), new=str(new_value)))
+        change_dicts.append({"field": label, "old": str(old_value), "new": str(new_value)})
+
+    if changes:
+        road.updated_at = datetime.now(timezone.utc).isoformat()
+        write_log_entry(
+            db,
+            kind="edit",
+            status="completed",
+            file_name=f"Inline edit: {seg.road_id} ({seg.start_station_raw}–{seg.end_station_raw})",
+            details=[
+                {
+                    "road_id": seg.road_id,
+                    "road_name": road.road_name,
+                    "action": "edited",
+                    "change_summary": "; ".join(f"{c['field']}: {c['old']} → {c['new']}" for c in change_dicts),
+                }
+            ],
+        )
+
+    db.commit()
+    db.refresh(seg)
+
+    return SegmentEditOut(
+        segment=SegmentRecord(
+            id=seg.id,
+            index=0,
+            road_id=seg.road_id,
+            road_name=road.road_name,
+            start_station=seg.start_station_raw,
+            end_station=seg.end_station_raw,
+            num_lanes=seg.num_lanes,
+            surface_type=seg.surface_type,
+            shoulder_left=seg.shoulder_left,
+            shoulder_right=seg.shoulder_right,
+            status=_derive_status(seg.surface_type),
+        ),
+        changes=changes,
     )
 
 

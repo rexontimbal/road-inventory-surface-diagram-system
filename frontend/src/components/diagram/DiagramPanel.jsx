@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { renderDiagram, renderSingleStrip, getNumStrips } from './diagramRenderer'
 import { formatStation } from '../../utils/chainage'
 import Legend from './Legend'
+import DiagramFullscreen from './DiagramFullscreen'
 
 // Sums only the portion of each segment that falls inside `range` (if given)
 // so the completion % reflects just the selected station range, not the
@@ -27,11 +28,19 @@ function computeCompletion(roadDetail, range) {
   return { pct, doneM, totalM }
 }
 
-export default function DiagramPanel({ road, diagramVersion, hasGenerated, hasRoads }) {
+const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, hasGenerated, hasRoads }, ref) {
   const canvasRef = useRef(null)
   const hitRegionsRef = useRef([])
   const printCanvasRefs = useRef([])
+  const fullscreenBtnRef = useRef(null)
   const [tooltip, setTooltip] = useState(null)
+  const [fullscreenOpen, setFullscreenOpen] = useState(false)
+
+  useImperativeHandle(ref, () => ({
+    openFullscreen: () => {
+      if (hasGenerated) setFullscreenOpen(true)
+    },
+  }))
 
   const numStrips = useMemo(
     () => (road ? getNumStrips(road.roadDetail, road.settings, road.range) : 0),
@@ -104,6 +113,19 @@ export default function DiagramPanel({ road, diagramVersion, hasGenerated, hasRo
       <div className="panel-header-row">
         <h2>5. Road Surface Diagram</h2>
         <div className="no-print" style={{ display: 'flex', gap: 6 }}>
+          <button
+            type="button"
+            ref={fullscreenBtnRef}
+            className="btn-icon-32"
+            onClick={() => setFullscreenOpen(true)}
+            disabled={!hasGenerated}
+            title="Fullscreen (F)"
+            aria-label="Open diagram in fullscreen"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3m11-5v3a2 2 0 0 1-2 2h-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
           <button className="btn-compact" onClick={printDiagram} disabled={!hasGenerated}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M6 9V4h12v5M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2M6 14h12v6H6z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
@@ -118,7 +140,10 @@ export default function DiagramPanel({ road, diagramVersion, hasGenerated, hasRo
           </button>
         </div>
       </div>
-      <p className="hint no-print">Ten station intervals are shown on each horizontal line. Hover a segment for details.</p>
+      <p className="hint no-print">
+        {road?.settings?.stationsPerLine ?? 10} station interval{(road?.settings?.stationsPerLine ?? 10) !== 1 ? 's' : ''} are
+        shown on each horizontal line. Hover a segment for details.
+      </p>
 
       {completion && (
         <div className="completion-summary no-print">
@@ -233,6 +258,21 @@ export default function DiagramPanel({ road, diagramVersion, hasGenerated, hasRo
           </div>
         </div>
       )}
+
+      {fullscreenOpen && hasGenerated && (
+        <DiagramFullscreen
+          road={road}
+          completion={completion}
+          sourceCanvas={canvasRef.current}
+          hitRegions={hitRegionsRef.current}
+          onClose={() => setFullscreenOpen(false)}
+          onPrint={printDiagram}
+          onExportPng={exportPng}
+          triggerRef={fullscreenBtnRef}
+        />
+      )}
     </div>
   )
-}
+})
+
+export default DiagramPanel

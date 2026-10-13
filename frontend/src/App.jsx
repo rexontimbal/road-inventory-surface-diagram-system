@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import Header from './components/Header'
+import { useEffect, useRef, useState } from 'react'
+import Header, { openHowToUse } from './components/Header'
 import UploadPanel from './components/sidebar/UploadPanel'
 import RoadSelectPanel from './components/sidebar/RoadSelectPanel'
 import DiagramSettingsPanel from './components/sidebar/DiagramSettingsPanel'
@@ -50,6 +50,8 @@ export default function App() {
   // backend DB; this is just the descriptive file name/timestamp).
   const [uploadMeta, setUploadMeta] = useState(readUploadMeta)
   const [networkSummaryOpen, setNetworkSummaryOpen] = useState(readStoredNetworkSummaryOpen)
+  const uploadPanelRef = useRef(null)
+  const diagramPanelRef = useRef(null)
 
   async function refreshRoads() {
     const list = await fetchRoadsList()
@@ -95,6 +97,51 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tablePage, tableFilters, tableSort])
 
+  // Global keyboard shortcuts -- disabled while typing in any field/dropdown
+  // search, or while a modal is open (every modal in this app sets
+  // document.body.style.overflow='hidden' while open, so that's a reliable
+  // cross-cutting signal without threading an "any modal open" flag through
+  // every component). Esc is handled individually by each modal already.
+  useEffect(() => {
+    function handleKeyDown(e) {
+      const tag = e.target.tagName
+      const isTyping = tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable
+      const modalOpen = document.body.style.overflow === 'hidden'
+      if (isTyping || modalOpen || e.metaKey || e.ctrlKey || e.altKey) return
+
+      switch (e.key) {
+        case '/':
+          e.preventDefault()
+          document.querySelector('.filter-field-road .custom-select-trigger')?.click()
+          break
+        case 'g':
+        case 'G':
+          handleGenerate()
+          break
+        case 'u':
+        case 'U':
+          uploadPanelRef.current?.openFilePicker()
+          break
+        case 'h':
+        case 'H':
+          uploadPanelRef.current?.openHistory()
+          break
+        case 'f':
+        case 'F':
+          diagramPanelRef.current?.openFullscreen()
+          break
+        case '?':
+          openHowToUse()
+          break
+        default:
+          break
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roadDetail, range])
+
   async function handleFilterChange(newFilters) {
     // The ROAD filter and "2. Select Road" are kept in sync both ways: if
     // this change came from the table's Road dropdown (or Clear filters),
@@ -107,12 +154,14 @@ export default function App() {
     setTablePage(1)
   }
 
+  // Three-state cycle per column: ascending -> descending -> back to the
+  // default (unsorted, original upload order) rather than just toggling
+  // forever between asc/desc.
   function handleSortChange(column) {
     setTableSort((prev) => {
-      if (prev.sortBy === column) {
-        return { sortBy: column, sortDir: prev.sortDir === 'asc' ? 'desc' : 'asc' }
-      }
-      return { sortBy: column, sortDir: 'asc' }
+      if (prev.sortBy !== column) return { sortBy: column, sortDir: 'asc' }
+      if (prev.sortDir === 'asc') return { sortBy: column, sortDir: 'desc' }
+      return { sortBy: null, sortDir: 'asc' }
     })
     setTablePage(1)
   }
@@ -149,6 +198,43 @@ export default function App() {
         message: `${selectedRoadId} was updated. Regenerate the diagram to see changes.`,
       })
     }
+  }
+
+  async function handleSegmentEdited(roadId) {
+    // The edit already changed the DB; refetch the current page/sort/filter
+    // view so the row reflects the saved values, plus the network summary
+    // since surface_type edits change the asphalted %.
+    await refreshSegmentsPage(tablePage, tableFilters, tableSort)
+    await refreshSummary()
+
+    // If the edited road's diagram is the one currently on screen, refresh
+    // its detail (so regenerating draws the new data) but don't silently
+    // redraw an already-generated diagram out from under the user.
+    if (roadId === selectedRoadId) {
+      const detail = await fetchRoadDetail(roadId)
+      setRoadDetail(detail)
+      if (hasGenerated) {
+        showToast({ variant: 'info', message: `${roadId} was updated. Regenerate the diagram to see changes.` })
+      }
+    }
+  }
+
+  async function handleRestored() {
+    // A restore can replace or merge an arbitrary set of roads (including a
+    // full wipe-and-replace) -- rather than trying to cleverly preserve
+    // whatever was selected/filtered before, reset to a clean state and
+    // reload everything from scratch, same approach as "all roads deleted".
+    setSelectedRoadId('')
+    setRoadDetail(null)
+    setHasGenerated(false)
+    setGeneratedRange(null)
+    setRange({ startRaw: '', endRaw: '' })
+    const clearedFilters = { roadId: '', status: '', surfaceType: '' }
+    setTableFilters(clearedFilters)
+    setTablePage(1)
+    await refreshRoads()
+    await refreshSegmentsPage(1, clearedFilters, tableSort)
+    await refreshSummary()
   }
 
   async function handleSelectRoad(roadId) {
@@ -250,7 +336,9 @@ export default function App() {
             </svg>
           </button>
           <UploadPanel
+            ref={uploadPanelRef}
             onUploaded={handleUploaded}
+            onRestored={handleRestored}
             roads={roads}
             uploadMeta={uploadMeta}
             collapsed={sidebarCollapsed}
@@ -292,8 +380,10 @@ export default function App() {
             onFilterChange={handleFilterChange}
             sort={tableSort}
             onSortChange={handleSortChange}
+            onSegmentEdited={handleSegmentEdited}
           />
           <DiagramPanel
+            ref={diagramPanelRef}
             road={roadDetail ? { roadDetail, settings, range: generatedRange } : null}
             diagramVersion={diagramVersion}
             hasGenerated={hasGenerated}

@@ -1,9 +1,24 @@
+import { useState } from 'react'
 import Pagination from './Pagination'
 import CustomSelect from '../common/CustomSelect'
-import { getSegmentsExportUrl } from '../../api/roads'
+import { editSegment, getSegmentsExportUrl } from '../../api/roads'
 import { SURFACE_SWATCHES } from '../../utils/surfaceSwatches'
+import { showToast } from '../common/DialogProvider'
 
 const SURFACE_TYPE_OPTIONS = ['unpaved', 'paved', 'gravel', 'asphalt']
+const SURFACE_EDIT_OPTIONS = SURFACE_TYPE_OPTIONS.map((s) => ({
+  value: s,
+  label: s.charAt(0).toUpperCase() + s.slice(1),
+}))
+
+function renderSurfaceOption(o) {
+  return (
+    <span className="custom-select-surface-option">
+      <span className="custom-select-surface-swatch" style={SURFACE_SWATCHES[o.value]} />
+      {o.label}
+    </span>
+  )
+}
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
@@ -19,9 +34,10 @@ const COLUMNS = [
   { label: 'End Station', key: 'end_station' },
   { label: 'Number of Lanes', key: 'num_lanes' },
   { label: 'Surface Type', key: 'surface_type' },
-  { label: 'Left Shoulder', key: null },
-  { label: 'Right Shoulder', key: null },
+  { label: 'Left Shoulder', key: 'shoulder_left' },
+  { label: 'Right Shoulder', key: 'shoulder_right' },
   { label: 'Status', key: 'status' },
+  { label: '', key: null },
 ]
 
 export default function RoadInventoryTable({
@@ -32,9 +48,14 @@ export default function RoadInventoryTable({
   onFilterChange,
   sort,
   onSortChange,
+  onSegmentEdited,
 }) {
   const records = segmentsPage?.records || []
   const hasActiveFilters = !!(filters.roadId || filters.status || filters.surfaceType)
+
+  const [editingId, setEditingId] = useState(null)
+  const [draft, setDraft] = useState(null)
+  const [saving, setSaving] = useState(false)
 
   const roadOptions = [
     { value: '', label: 'All roads' },
@@ -51,6 +72,81 @@ export default function RoadInventoryTable({
 
   function clearFilters() {
     onFilterChange({ roadId: '', status: '', surfaceType: '' })
+  }
+
+  function startEdit(r) {
+    setEditingId(r.id)
+    setDraft({
+      num_lanes: r.num_lanes,
+      surface_type: r.surface_type,
+      shoulder_left: r.shoulder_left,
+      shoulder_right: r.shoulder_right,
+    })
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setDraft(null)
+  }
+
+  async function saveEdit(original) {
+    if (saving || !draft) return
+    const fields = {}
+    if (draft.num_lanes !== original.num_lanes) fields.num_lanes = draft.num_lanes
+    if (draft.surface_type !== original.surface_type) fields.surface_type = draft.surface_type
+    if (draft.shoulder_left !== original.shoulder_left) fields.shoulder_left = draft.shoulder_left
+    if (draft.shoulder_right !== original.shoulder_right) fields.shoulder_right = draft.shoulder_right
+
+    if (Object.keys(fields).length === 0) {
+      cancelEdit()
+      return
+    }
+
+    setSaving(true)
+    try {
+      await editSegment(original.id, fields)
+      cancelEdit()
+      onSegmentEdited?.(original.road_id)
+      showToast({
+        variant: 'success',
+        message: `${original.road_id} segment updated (${original.start_station}–${original.end_station})`,
+        actionLabel: 'Undo',
+        duration: 8000,
+        onAction: async () => {
+          try {
+            await editSegment(original.id, {
+              num_lanes: original.num_lanes,
+              surface_type: original.surface_type,
+              shoulder_left: original.shoulder_left,
+              shoulder_right: original.shoulder_right,
+            })
+            onSegmentEdited?.(original.road_id)
+            showToast({ variant: 'info', message: `${original.road_id} segment reverted` })
+          } catch (err) {
+            showToast({ variant: 'danger', message: `Undo failed: ${err.message}` })
+          }
+        },
+      })
+    } catch (err) {
+      showToast({ variant: 'danger', message: `Could not save: ${err.message}` })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function handleRowKeyDown(e, r) {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      saveEdit(r)
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      cancelEdit()
+    }
+  }
+
+  function sortAriaValue(key) {
+    if (sort.sortBy !== key) return 'none'
+    return sort.sortDir === 'asc' ? 'ascending' : 'descending'
   }
 
   return (
@@ -117,16 +213,7 @@ export default function RoadInventoryTable({
             onChange={(v) => updateFilter('surfaceType', v)}
             options={surfaceOptions}
             ariaLabel="Filter by surface type"
-            renderOption={(o) =>
-              o.value === '' ? (
-                o.label
-              ) : (
-                <span className="custom-select-surface-option">
-                  <span className="custom-select-surface-swatch" style={SURFACE_SWATCHES[o.value]} />
-                  {o.label}
-                </span>
-              )
-            }
+            renderOption={(o) => (o.value === '' ? o.label : renderSurfaceOption(o))}
           />
         </div>
         {hasActiveFilters && (
@@ -156,15 +243,18 @@ export default function RoadInventoryTable({
         <table>
           <thead>
             <tr>
-              {COLUMNS.map((col) => (
+              {COLUMNS.map((col, i) => (
                 <th
-                  key={col.label}
+                  key={col.label || `col-${i}`}
                   className={col.key ? 'sortable-th' : ''}
                   onClick={col.key ? () => onSortChange(col.key) : undefined}
+                  aria-sort={col.key ? sortAriaValue(col.key) : undefined}
                 >
-                  {col.label}
-                  {col.key && sort.sortBy === col.key && (
-                    <span className="sort-arrow">{sort.sortDir === 'asc' ? ' ▲' : ' ▼'}</span>
+                  <span className="th-label">{col.label}</span>
+                  {col.key && (
+                    <span className={`sort-icon${sort.sortBy === col.key ? ' sort-icon-active' : ''}`} aria-hidden="true">
+                      {sort.sortBy === col.key ? (sort.sortDir === 'asc' ? '▲' : '▼') : '↕'}
+                    </span>
                   )}
                 </th>
               ))}
@@ -173,7 +263,7 @@ export default function RoadInventoryTable({
           <tbody>
             {records.length === 0 && (
               <tr>
-                <td colSpan={10} className="empty-row">
+                <td colSpan={COLUMNS.length} className="empty-row">
                   {roads.length === 0
                     ? 'No road data yet. Upload an Excel file to get started.'
                     : hasActiveFilters
@@ -182,32 +272,132 @@ export default function RoadInventoryTable({
                 </td>
               </tr>
             )}
-            {records.map((r) => (
-              <tr key={`${r.road_id}-${r.index}`}>
-                <td>{r.index}</td>
-                <td>{r.road_id}</td>
-                <td>{r.road_name}</td>
-                <td>{r.start_station}</td>
-                <td>{r.end_station}</td>
-                <td>{r.num_lanes}</td>
-                <td>{r.surface_type}</td>
-                <td>{r.shoulder_left}</td>
-                <td>{r.shoulder_right}</td>
-                <td>
-                  <span
-                    className={`status-badge ${r.status === 'Complete' ? 'status-badge-good' : 'status-badge-critical'}`}
-                    title={
-                      r.status === 'Complete'
-                        ? 'Complete = asphalt surface'
-                        : `Incomplete = not yet asphalt (surface is "${r.surface_type}")`
-                    }
-                  >
-                    <span aria-hidden="true">{r.status === 'Complete' ? '✓' : '✕'}</span>
-                    {r.status}
-                  </span>
-                </td>
-              </tr>
-            ))}
+            {records.map((r) => {
+              const isEditing = editingId === r.id
+              return (
+                <tr
+                  key={`${r.road_id}-${r.index}`}
+                  className={isEditing ? 'editing-row' : ''}
+                  onKeyDown={isEditing ? (e) => handleRowKeyDown(e, r) : undefined}
+                >
+                  <td>{r.index}</td>
+                  <td>{r.road_id}</td>
+                  <td>{r.road_name}</td>
+                  <td title="Edit stations via Excel upload.">{r.start_station}</td>
+                  <td title="Edit stations via Excel upload.">{r.end_station}</td>
+                  <td>
+                    {isEditing ? (
+                      <input
+                        type="number"
+                        min={1}
+                        max={12}
+                        className="inline-edit-number"
+                        value={draft.num_lanes}
+                        onChange={(e) => setDraft((d) => ({ ...d, num_lanes: Number(e.target.value) }))}
+                        autoFocus
+                      />
+                    ) : (
+                      r.num_lanes
+                    )}
+                  </td>
+                  <td>
+                    {isEditing ? (
+                      <CustomSelect
+                        size="sm"
+                        value={draft.surface_type}
+                        onChange={(v) => setDraft((d) => ({ ...d, surface_type: v }))}
+                        options={SURFACE_EDIT_OPTIONS}
+                        ariaLabel="Surface type"
+                        renderOption={renderSurfaceOption}
+                        triggerClassName="inline-edit-select"
+                      />
+                    ) : (
+                      r.surface_type
+                    )}
+                  </td>
+                  <td>
+                    {isEditing ? (
+                      <CustomSelect
+                        size="sm"
+                        value={draft.shoulder_left}
+                        onChange={(v) => setDraft((d) => ({ ...d, shoulder_left: v }))}
+                        options={SURFACE_EDIT_OPTIONS}
+                        ariaLabel="Left shoulder"
+                        renderOption={renderSurfaceOption}
+                        triggerClassName="inline-edit-select"
+                      />
+                    ) : (
+                      r.shoulder_left
+                    )}
+                  </td>
+                  <td>
+                    {isEditing ? (
+                      <CustomSelect
+                        size="sm"
+                        value={draft.shoulder_right}
+                        onChange={(v) => setDraft((d) => ({ ...d, shoulder_right: v }))}
+                        options={SURFACE_EDIT_OPTIONS}
+                        ariaLabel="Right shoulder"
+                        renderOption={renderSurfaceOption}
+                        triggerClassName="inline-edit-select"
+                      />
+                    ) : (
+                      r.shoulder_right
+                    )}
+                  </td>
+                  <td>
+                    <span
+                      className={`status-badge ${r.status === 'Complete' ? 'status-badge-good' : 'status-badge-critical'}`}
+                      title={
+                        r.status === 'Complete'
+                          ? 'Complete = asphalt surface'
+                          : `Incomplete = not yet asphalt (surface is "${r.surface_type}")`
+                      }
+                    >
+                      <span aria-hidden="true">{r.status === 'Complete' ? '✓' : '✕'}</span>
+                      {r.status}
+                    </span>
+                  </td>
+                  <td className="row-actions-cell">
+                    {isEditing ? (
+                      <>
+                        <button
+                          type="button"
+                          className="row-action-btn row-action-save"
+                          onClick={() => saveEdit(r)}
+                          disabled={saving}
+                          title="Save"
+                          aria-label="Save"
+                        >
+                          ✓
+                        </button>
+                        <button
+                          type="button"
+                          className="row-action-btn row-action-cancel"
+                          onClick={cancelEdit}
+                          title="Cancel"
+                          aria-label="Cancel"
+                        >
+                          ✕
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className="row-edit-btn"
+                        onClick={() => startEdit(r)}
+                        title="Edit segment"
+                        aria-label="Edit segment"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                          <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>

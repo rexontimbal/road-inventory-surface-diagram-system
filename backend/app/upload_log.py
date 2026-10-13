@@ -54,7 +54,15 @@ def write_log_entry(
     """Adds a log row to the session -- caller commits it as part of the
     same transaction as the data change it describes."""
     details = details or []
-    counts = {"added": 0, "replaced": 0, "kept_existing": 0, "up_to_date": 0, "rejected": 0, "deleted": 0}
+    counts = {
+        "added": 0,
+        "replaced": 0,
+        "kept_existing": 0,
+        "up_to_date": 0,
+        "rejected": 0,
+        "deleted": 0,
+        "edited": 0,
+    }
     for d in details:
         if d["action"] in counts:
             counts[d["action"]] += 1
@@ -73,13 +81,14 @@ def write_log_entry(
         up_to_date_count=counts["up_to_date"],
         rejected_count=counts["rejected"],
         deleted_count=counts["deleted"],
+        edited_count=counts["edited"],
         details_json=json.dumps(details),
     )
     db.add(entry)
     return entry
 
 
-def _entry_to_out(entry: UploadLogEntry) -> UploadLogOut:
+def entry_to_out(entry: UploadLogEntry) -> UploadLogOut:
     details = json.loads(entry.details_json or "[]")
     return UploadLogOut(
         id=entry.id,
@@ -96,6 +105,7 @@ def _entry_to_out(entry: UploadLogEntry) -> UploadLogOut:
         up_to_date_count=entry.up_to_date_count,
         rejected_count=entry.rejected_count,
         deleted_count=entry.deleted_count,
+        edited_count=entry.edited_count,
         details=[LogRoadDetail(**d) for d in details],
     )
 
@@ -103,7 +113,12 @@ def _entry_to_out(entry: UploadLogEntry) -> UploadLogOut:
 def _matches_filters(entry: UploadLogEntry, search: str | None, action: str | None) -> bool:
     details = json.loads(entry.details_json or "[]")
     if action and action != "all":
-        entry_actions = {"deleted"} if entry.kind == "delete" else {d["action"] for d in details}
+        if entry.kind == "delete":
+            entry_actions = {"deleted"}
+        elif entry.kind == "restore":
+            entry_actions = {"restored"} | {d["action"] for d in details}
+        else:
+            entry_actions = {d["action"] for d in details}
         if action not in entry_actions:
             return False
     if search:
@@ -137,7 +152,7 @@ def query_log(db, *, search=None, action=None, date_range=None, page=1, page_siz
         page_size=page_size,
         total_pages=total_pages,
         total_records=total_records,
-        entries=[_entry_to_out(e) for e in page_rows],
+        entries=[entry_to_out(e) for e in page_rows],
     )
 
 

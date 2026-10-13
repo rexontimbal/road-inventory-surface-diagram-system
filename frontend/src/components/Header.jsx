@@ -27,22 +27,44 @@ function formatLastUpload(date) {
   return `Last upload: ${dateStr}, ${time}`
 }
 
-function openHowToUse() {
+const KEYBOARD_SHORTCUTS = [
+  { keys: '/', detail: 'Focus the Road filter' },
+  { keys: 'G', detail: 'Generate the diagram (when enabled)' },
+  { keys: 'F', detail: 'Open the diagram fullscreen (when generated)' },
+  { keys: 'U', detail: 'Open Choose Excel File' },
+  { keys: 'H', detail: 'Open Upload History' },
+  { keys: '?', detail: 'Open this help' },
+]
+
+export function openHowToUse() {
   showAlert({
     title: 'How to use this system',
     confirmText: 'Got it',
     variant: 'info',
     message: (
-      <ol className="how-to-use-list">
-        {HOW_TO_USE_STEPS.map((step, i) => (
-          <li key={step.title}>
-            <span className="how-to-use-step-n">{i + 1}</span>
-            <span>
-              <strong>{step.title}.</strong> {step.detail}
-            </span>
-          </li>
-        ))}
-      </ol>
+      <>
+        <ol className="how-to-use-list">
+          {HOW_TO_USE_STEPS.map((step, i) => (
+            <li key={step.title}>
+              <span className="how-to-use-step-n">{i + 1}</span>
+              <span>
+                <strong>{step.title}.</strong> {step.detail}
+              </span>
+            </li>
+          ))}
+        </ol>
+        <div className="how-to-use-shortcuts">
+          <strong>Keyboard shortcuts</strong>
+          <ul className="shortcut-list">
+            {KEYBOARD_SHORTCUTS.map((s) => (
+              <li key={s.keys}>
+                <kbd>{s.keys}</kbd>
+                <span>{s.detail}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </>
     ),
   })
 }

@@ -24,6 +24,8 @@
   --info: #2a78d6;
   --info-soft: #eaf2fc;
   --info-border: #bfdbfe;
+  --restore: #7c3aed;
+  --restore-soft: #f1ebfd;
   --header-bg: #10131a;
   --header-text: #ffffff;
   --header-subtext: #9aa3b5;
@@ -62,6 +64,8 @@
     --info: #3987e5;
     --info-soft: #16273d;
     --info-border: #1e3a5f;
+    --restore: #a78bfa;
+    --restore-soft: #2e1f4d;
     --header-bg: #050608;
     --header-text: #ffffff;
     --header-subtext: #8891a3;

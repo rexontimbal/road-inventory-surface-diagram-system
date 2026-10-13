@@ -105,6 +105,15 @@ export function getSegmentsExportUrl(filters = {}, sort = {}) {
   return `${BASE}/segments/export?${params.toString()}`
 }
 
+export async function editSegment(segmentId, fields) {
+  const res = await fetch(`${BASE}/segments/${segmentId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(fields),
+  })
+  return handleResponse(res)
+}
+
 export async function fetchNetworkSummary() {
   const res = await fetch(`${BASE}/summary`)
   return handleResponse(res)

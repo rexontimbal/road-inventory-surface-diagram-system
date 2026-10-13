@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse
 
 from app.db import Base, engine, ensure_schema
-from app.routers import roads
+from app.routers import backup, roads
 
 Base.metadata.create_all(bind=engine)
 ensure_schema()
@@ -22,6 +22,7 @@ app.add_middleware(
 )
 
 app.include_router(roads.router)
+app.include_router(backup.router)
 
 
 @app.get("/api/health")

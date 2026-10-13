@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useModalLayer } from '../common/useModalLayer'
 
 function formatDate(iso) {
   if (!iso) return 'unknown date'
@@ -19,11 +20,13 @@ export default function UploadConflictModal({ duplicates, newCount, sourceFile, 
     Object.fromEntries(duplicates.map((d) => [d.road_id, 'keep']))
   )
   const cardRef = useRef(null)
+  const { zIndex, isTop } = useModalLayer()
 
   useEffect(() => {
     const prevOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     function handleKeyDown(e) {
+      if (!isTop()) return
       if (e.key === 'Escape') {
         e.preventDefault()
         onCancel()
@@ -48,9 +51,12 @@ export default function UploadConflictModal({ duplicates, newCount, sourceFile, 
   const title =
     duplicates.length === 1 ? 'Road ID already exists' : `${duplicates.length} Road IDs already exist`
 
+  if (zIndex == null) return null
+
   return createPortal(
     <div
       className="modal-backdrop no-print"
+      style={{ zIndex }}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onCancel()
       }}

@@ -72,7 +72,7 @@ class UploadLogEntry(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     timestamp = Column(String, nullable=False)
-    kind = Column(String, nullable=False)  # "upload" | "delete"
+    kind = Column(String, nullable=False)  # "upload" | "delete" | "restore" | "edit"
     status = Column(String, nullable=False)  # "completed" | "cancelled" | "failed"
     file_name = Column(String, nullable=True)
     file_size = Column(Integer, nullable=True)
@@ -84,6 +84,7 @@ class UploadLogEntry(Base):
     up_to_date_count = Column(Integer, nullable=False, default=0)
     rejected_count = Column(Integer, nullable=False, default=0)
     deleted_count = Column(Integer, nullable=False, default=0)
+    edited_count = Column(Integer, nullable=False, default=0)
     # JSON-encoded list of per-road detail dicts: road_id, road_name, action,
     # segment_count, change_summary, rejection_reasons. Kept as one blob
     # rather than a child table -- it's always read/written as a whole with

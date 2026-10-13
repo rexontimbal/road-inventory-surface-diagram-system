@@ -37,6 +37,11 @@ def ensure_schema():
             # Backfill from updated_at so pre-existing roads have a sensible
             # "first uploaded" value instead of NULL.
             conn.exec_driver_sql("UPDATE roads SET uploaded_at = updated_at WHERE uploaded_at IS NULL")
+
+        log_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(upload_log)").fetchall()}
+        if "edited_count" not in log_cols:
+            conn.exec_driver_sql("ALTER TABLE upload_log ADD COLUMN edited_count INTEGER NOT NULL DEFAULT 0")
+
         conn.commit()
 
 
