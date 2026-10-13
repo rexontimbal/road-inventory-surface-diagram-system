@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useModalLayer } from '../common/useModalLayer'
+import { getFullscreenPortalRoot } from '../../utils/fullscreenPortal'
 
 function formatDate(iso) {
   if (!iso) return 'unknown date'
@@ -164,6 +165,6 @@ export default function UploadConflictModal({ duplicates, newCount, sourceFile, 
         </div>
       </div>
     </div>,
-    document.body
+    getFullscreenPortalRoot()
   )
 }

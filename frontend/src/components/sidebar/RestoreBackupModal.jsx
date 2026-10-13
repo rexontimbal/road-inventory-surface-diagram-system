@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useModalLayer } from '../common/useModalLayer'
+import { getFullscreenPortalRoot } from '../../utils/fullscreenPortal'
 
 function formatDateTime(iso) {
   const d = new Date(iso)
@@ -189,6 +190,6 @@ export default function RestoreBackupModal({ preview, onCancel, onContinue }) {
         </div>
       </div>
     </div>,
-    document.body
+    getFullscreenPortalRoot()
   )
 }

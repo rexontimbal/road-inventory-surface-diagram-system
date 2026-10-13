@@ -1,8 +1,10 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { renderDiagram, renderSingleStrip, getNumStrips } from './diagramRenderer'
+import { renderDiagram, renderSingleStrip, getNumStrips, getRowLabelLayout, getCanvasLogicalSize } from './diagramRenderer'
 import { formatStation } from '../../utils/chainage'
 import Legend from './Legend'
 import DiagramFullscreen from './DiagramFullscreen'
+import { showToast } from '../common/DialogProvider'
+import { useDevicePixelRatio } from '../../utils/useDevicePixelRatio'
 
 // Sums only the portion of each segment that falls inside `range` (if given)
 // so the completion % reflects just the selected station range, not the
@@ -28,18 +30,65 @@ function computeCompletion(roadDetail, range) {
   return { pct, doneM, totalM }
 }
 
+const WRAP_PADDING_PX = 32 // .diagram-canvas-wrap's 16px padding on each side
+// Print/export don't have a "device" to match -- both render once, offscreen
+// or into a page the viewer may still pinch-zoom, so they use a flat HD
+// factor instead of devicePixelRatio (which could be as low as 1 even on a
+// perfectly normal monitor).
+const PRINT_SCALE = 3
+const EXPORT_SCALE = 2
+
 const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, hasGenerated, hasRoads }, ref) {
+  const dpr = useDevicePixelRatio()
   const canvasRef = useRef(null)
+  const canvasWrapRef = useRef(null)
   const hitRegionsRef = useRef([])
   const printCanvasRefs = useRef([])
   const fullscreenBtnRef = useRef(null)
+  // Always mounted (never conditionally rendered), so it already exists in
+  // the DOM for requestFullscreen() to target synchronously the instant the
+  // user clicks/presses F -- DiagramFullscreen itself only mounts inside it
+  // a render later, which would be too late (the Fullscreen API requires
+  // the call to happen within the original user-gesture call stack).
+  const fullscreenAnchorRef = useRef(null)
   const [tooltip, setTooltip] = useState(null)
   const [fullscreenOpen, setFullscreenOpen] = useState(false)
+  // Default view is "fit to width" (mirrors fullscreen's own default) --
+  // never upscaled past native resolution, only shrunk when the natural
+  // diagram width can't fit the panel. Horizontal scroll is the fallback
+  // for whatever doesn't fit even at that minimum.
+  const [fitScale, setFitScale] = useState(1)
+  const [nativeSize, setNativeSize] = useState({ width: 0, height: 0 })
+  const [canvasScrolled, setCanvasScrolled] = useState(false)
+
+  // Must run synchronously in direct response to a click/keydown -- no
+  // await or setTimeout before requestFullscreen(), or the browser silently
+  // refuses it (the call is only honored while still inside the original
+  // user-gesture call stack).
+  function openFullscreen() {
+    if (!hasGenerated) return
+    setFullscreenOpen(true)
+    const anchor = fullscreenAnchorRef.current
+    if (!anchor) return
+    const request = anchor.requestFullscreen
+      ? () => anchor.requestFullscreen({ navigationUI: 'hide' })
+      : anchor.webkitRequestFullscreen
+      ? () => anchor.webkitRequestFullscreen()
+      : null
+    if (!request) {
+      showToast({ variant: 'info', message: 'Fullscreen not supported here. Showing expanded view.' })
+      return
+    }
+    // Rejected (e.g. iframe restrictions) or simply unsupported on this
+    // device (iPhone Safari) -- the overlay opened above either way, so
+    // this is purely a "heads up, it's windowed" notice, not an error path.
+    request().catch(() => {
+      showToast({ variant: 'info', message: 'Fullscreen not supported here. Showing expanded view.' })
+    })
+  }
 
   useImperativeHandle(ref, () => ({
-    openFullscreen: () => {
-      if (hasGenerated) setFullscreenOpen(true)
-    },
+    openFullscreen,
   }))
 
   const numStrips = useMemo(
@@ -47,23 +96,89 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
     [road, diagramVersion]
   )
 
+  // Positions of the "Shoulder"/"Lane N" text baked into the canvas's own
+  // left margin -- mirrored as a sticky HTML overlay (below) so that column
+  // stays visible while the canvas itself scrolls horizontally. It sits
+  // directly on top of (not beside) that same margin, opaquely covering the
+  // canvas's own copy, so the text reads once -- the canvas bitmap itself
+  // (and therefore fullscreen/print/export, which all derive from it) still
+  // has it painted in underneath, untouched.
+  const rowLabelLayoutNative = useMemo(
+    () => (road ? getRowLabelLayout(road.roadDetail, road.settings, road.range) : { labels: [], leftWidth: 0, totalHeight: 0 }),
+    [road, diagramVersion]
+  )
+  // Scaled to match whatever size the canvas is actually displayed at
+  // (fitScale), so the overlay's rows stay pixel-aligned with the shrunk
+  // canvas's own rows at any zoom level.
+  const rowLabelLayout = useMemo(() => {
+    if (fitScale === 1) return rowLabelLayoutNative
+    return {
+      leftWidth: rowLabelLayoutNative.leftWidth * fitScale,
+      totalHeight: rowLabelLayoutNative.totalHeight * fitScale,
+      labels: rowLabelLayoutNative.labels.map((l) => ({ ...l, top: l.top * fitScale, height: l.height * fitScale })),
+    }
+  }, [rowLabelLayoutNative, fitScale])
+
   useEffect(() => {
     if (!hasGenerated) setTooltip(null)
   }, [hasGenerated])
 
   useEffect(() => {
     if (!road || !canvasRef.current) return
-    const result = renderDiagram(canvasRef.current, road.roadDetail, road.settings, road.range)
+    // Backing-store resolution = devicePixelRatio -- the canvas is still
+    // *displayed* at its logical CSS size (see the style on the <canvas>
+    // below), so this only adds pixel density, not visual size. Re-renders
+    // (not CSS-stretches) whenever dpr itself changes, e.g. dragging the
+    // window to a differently-scaled monitor.
+    const result = renderDiagram(canvasRef.current, road.roadDetail, road.settings, road.range, dpr)
     hitRegionsRef.current = result?.hitRegions || []
 
     // One canvas per strip for print, sized to fit one page each -- avoids
     // the browser pushing the whole tall combined canvas to a near-empty
-    // leading page before it "fits".
+    // leading page before it "fits". Rendered at a flat HD factor rather
+    // than dpr, since the screen's own pixel density has nothing to do with
+    // how sharp a printed page or PDF should be.
     printCanvasRefs.current.slice(0, numStrips).forEach((c, i) => {
-      if (c) renderSingleStrip(c, road.roadDetail, road.settings, i, road.range)
+      if (c) renderSingleStrip(c, road.roadDetail, road.settings, i, road.range, PRINT_SCALE)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [diagramVersion, numStrips, dpr])
+
+  // Recomputes the fit-to-width scale from the diagram's LOGICAL size (not
+  // canvas.width/height, which is now dpr-scaled and would otherwise make
+  // the canvas render at 1/dpr of its intended on-screen size). Runs after
+  // the effect above (declaration order) so it reflects whatever that just
+  // rendered. A new diagram also resets the horizontal scroll position,
+  // since the old scrollLeft is meaningless against a differently-sized one.
+  useEffect(() => {
+    function recomputeFitScale() {
+      const wrap = canvasWrapRef.current
+      if (!wrap || !road) {
+        setFitScale(1)
+        setNativeSize({ width: 0, height: 0 })
+        return
+      }
+      const logical = getCanvasLogicalSize(road.roadDetail, road.settings, road.range)
+      if (!logical.width) {
+        setFitScale(1)
+        setNativeSize({ width: 0, height: 0 })
+        return
+      }
+      setNativeSize(logical)
+      const available = wrap.clientWidth - WRAP_PADDING_PX
+      setFitScale(Math.min(1, available / logical.width))
+    }
+    recomputeFitScale()
+    if (canvasWrapRef.current) canvasWrapRef.current.scrollLeft = 0
+    setCanvasScrolled(false)
+    window.addEventListener('resize', recomputeFitScale)
+    return () => window.removeEventListener('resize', recomputeFitScale)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [diagramVersion, numStrips])
+
+  function handleCanvasWrapScroll(e) {
+    setCanvasScrolled(e.currentTarget.scrollLeft > 0)
+  }
 
   const completion = useMemo(
     () => (hasGenerated ? computeCompletion(road?.roadDetail, road?.range) : null),
@@ -75,12 +190,19 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
     return `_Sta${formatStation(road.range.startM)}-${formatStation(road.range.endM)}`
   }
 
+  // Renders into a throwaway offscreen canvas at a flat HD factor rather
+  // than exporting the on-screen canvas directly -- the on-screen one is
+  // only as sharp as this device's own devicePixelRatio (which could be a
+  // plain 1 on an ordinary external monitor), independent of what makes a
+  // *saved* PNG look good when someone views or prints it elsewhere.
   function exportPng() {
-    const canvas = canvasRef.current
-    if (!canvas || canvas.width === 0) return
+    if (!road) return
+    const exportCanvas = document.createElement('canvas')
+    const result = renderDiagram(exportCanvas, road.roadDetail, road.settings, road.range, EXPORT_SCALE)
+    if (!result || exportCanvas.width === 0) return
     const link = document.createElement('a')
     link.download = `${road.roadDetail.road_id}${rangeSuffix()}.png`
-    link.href = canvas.toDataURL('image/png')
+    link.href = exportCanvas.toDataURL('image/png')
     link.click()
   }
 
@@ -89,12 +211,13 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
   }
 
   function handleMouseMove(e) {
+    // hitRegions are in the canvas's native bitmap coordinates; offsetX/Y
+    // are in displayed (CSS) pixels, which differ once fitScale shrinks the
+    // canvas below its native size.
+    const nx = e.nativeEvent.offsetX / fitScale
+    const ny = e.nativeEvent.offsetY / fitScale
     const region = hitRegionsRef.current.find(
-      (r) =>
-        e.nativeEvent.offsetX >= r.x &&
-        e.nativeEvent.offsetX <= r.x + r.w &&
-        e.nativeEvent.offsetY >= r.y &&
-        e.nativeEvent.offsetY <= r.y + r.h
+      (r) => nx >= r.x && nx <= r.x + r.w && ny >= r.y && ny <= r.y + r.h
     )
     if (!region) {
       setTooltip(null)
@@ -117,7 +240,7 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
             type="button"
             ref={fullscreenBtnRef}
             className="btn-icon-32"
-            onClick={() => setFullscreenOpen(true)}
+            onClick={openFullscreen}
             disabled={!hasGenerated}
             title="Fullscreen (F)"
             aria-label="Open diagram in fullscreen"
@@ -163,7 +286,7 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
         </div>
       )}
 
-      <div className="diagram-canvas-wrap thin-scroll">
+      <div className="diagram-canvas-wrap thin-scroll" ref={canvasWrapRef} onScroll={handleCanvasWrapScroll}>
         {!hasGenerated && (
           <div className="diagram-empty-guide">
             <div className="guide-steps-row">
@@ -195,12 +318,44 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
           </div>
         )}
         {hasGenerated && (
-          <canvas
-            ref={canvasRef}
-            id="diagram-canvas"
-            onMouseMove={handleMouseMove}
-            onMouseLeave={() => setTooltip(null)}
-          />
+          <div className="diagram-canvas-scroll-area">
+            {rowLabelLayout.labels.length > 0 && (
+              // Wrapped in a zero-width, overflow-visible anchor so this
+              // column reserves no flex space of its own -- it overlays the
+              // canvas's own (identical, already-painted) margin instead of
+              // sitting beside it, which is what kept the labels from
+              // appearing twice.
+              <div className="diagram-row-labels-anchor no-print">
+                <div
+                  className={`diagram-row-labels${canvasScrolled ? ' diagram-row-labels-scrolled' : ''}`}
+                  style={{ width: rowLabelLayout.leftWidth, height: rowLabelLayout.totalHeight }}
+                  aria-hidden="true"
+                >
+                  {rowLabelLayout.labels.map((l) => (
+                    <span
+                      key={l.key}
+                      className="diagram-row-label"
+                      style={{ top: l.top, height: l.height, lineHeight: `${l.height}px`, fontSize: `${11 * fitScale}px` }}
+                    >
+                      {l.text}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            <canvas
+              ref={canvasRef}
+              id="diagram-canvas"
+              // Always explicit now (not just when shrinking): canvas.width
+              // is the dpr-scaled BACKING STORE, which a <canvas> with no
+              // CSS size displays at 1:1 -- i.e. dpr times too big on-screen
+              // without this, even when fitScale is 1 and nothing is meant
+              // to be scaled down at all.
+              style={nativeSize.width ? { width: nativeSize.width * fitScale, height: nativeSize.height * fitScale } : undefined}
+              onMouseMove={handleMouseMove}
+              onMouseLeave={() => setTooltip(null)}
+            />
+          </div>
         )}
       </div>
       <Legend />
@@ -259,18 +414,23 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
         </div>
       )}
 
-      {fullscreenOpen && hasGenerated && (
-        <DiagramFullscreen
-          road={road}
-          completion={completion}
-          sourceCanvas={canvasRef.current}
-          hitRegions={hitRegionsRef.current}
-          onClose={() => setFullscreenOpen(false)}
-          onPrint={printDiagram}
-          onExportPng={exportPng}
-          triggerRef={fullscreenBtnRef}
-        />
-      )}
+      {/* Always mounted (even when empty) so requestFullscreen() in
+          openFullscreen() above always has a real target -- see that
+          function's comment. DiagramFullscreen renders as its plain child
+          (no portal): its own position:fixed/inset:0 covers the viewport
+          whether or not the browser actually granted true fullscreen. */}
+      <div ref={fullscreenAnchorRef} className="diagram-fullscreen-anchor">
+        {fullscreenOpen && hasGenerated && (
+          <DiagramFullscreen
+            road={road}
+            completion={completion}
+            onClose={() => setFullscreenOpen(false)}
+            onPrint={printDiagram}
+            onExportPng={exportPng}
+            triggerRef={fullscreenBtnRef}
+          />
+        )}
+      </div>
     </div>
   )
 })

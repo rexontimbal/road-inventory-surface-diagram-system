@@ -9,6 +9,7 @@ import RestoreBackupModal from './RestoreBackupModal'
 
 const AUTO_MINIMIZE_AFTER_UPLOAD_MS = 3000
 const AUTO_MINIMIZE_AFTER_VIEW_MS = 5000
+const REQUIRED_COLUMNS_AUTO_HIDE_MS = 10000
 
 const REQUIRED_COLUMNS = [
   'ROAD ID',
@@ -39,7 +40,6 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
   // (see the `result`-keyed effect below), but data restored from a page
   // reload must NOT auto-expand or start the auto-minimize timer.
   const [resultExpanded, setResultExpanded] = useState(false)
-  const [progressKey, setProgressKey] = useState(0)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [hasUnreadLog, setHasUnreadLog] = useState(false)
   // Intentionally not persisted -- always starts collapsed on page load,
@@ -49,6 +49,7 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
   const timerRef = useRef(null)
   const durationRef = useRef(AUTO_MINIMIZE_AFTER_UPLOAD_MS)
   const historyBtnRef = useRef(null)
+  const requiredColumnsTimerRef = useRef(null)
 
   // Exposes a couple of actions to App.jsx's global keyboard shortcuts (U,
   // H) without threading extra props down -- App.jsx can't otherwise reach
@@ -74,6 +75,40 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
   function toggleRequiredColumns() {
     setRequiredColumnsOpen((prev) => !prev)
   }
+
+  function clearRequiredColumnsTimer() {
+    if (requiredColumnsTimerRef.current) {
+      clearTimeout(requiredColumnsTimerRef.current)
+      requiredColumnsTimerRef.current = null
+    }
+  }
+
+  function startRequiredColumnsTimer() {
+    clearRequiredColumnsTimer() // never stack two timers
+    requiredColumnsTimerRef.current = setTimeout(() => setRequiredColumnsOpen(false), REQUIRED_COLUMNS_AUTO_HIDE_MS)
+  }
+
+  function handleRequiredColumnsPause() {
+    clearRequiredColumnsTimer()
+  }
+
+  function handleRequiredColumnsResume() {
+    if (requiredColumnsOpen) startRequiredColumnsTimer()
+  }
+
+  // Single place that starts/stops the auto-hide timer, driven purely by
+  // the open/closed state -- covers manual toggle-open, auto-expand on a
+  // rejected upload, and manual close (whether by the toggle or by the
+  // timer itself) without duplicating start/stop calls at each call site.
+  useEffect(() => {
+    if (!requiredColumnsOpen) {
+      clearRequiredColumnsTimer()
+      return
+    }
+    startRequiredColumnsTimer()
+    return clearRequiredColumnsTimer
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requiredColumnsOpen])
 
   function requestPersistentStorageOnce() {
     if (persistRequestedRef.current) return
@@ -164,7 +199,6 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
   function startAutoMinimizeTimer(duration) {
     clearAutoMinimizeTimer() // never stack two timers
     durationRef.current = duration
-    setProgressKey((k) => k + 1) // restarts the CSS progress-bar animation
     timerRef.current = setTimeout(() => setResultExpanded(false), duration)
   }
 
@@ -526,19 +560,16 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
             </div>
           </div>
 
-          {resultExpanded && (
-            <div className="upload-summary-progress-track">
-              <div
-                key={progressKey}
-                className="upload-summary-progress-bar"
-                style={{ animationDuration: `${durationRef.current}ms` }}
-              />
-            </div>
-          )}
         </div>
       )}
 
-      <div className="required-columns">
+      <div
+        className="required-columns"
+        onMouseEnter={handleRequiredColumnsPause}
+        onMouseLeave={handleRequiredColumnsResume}
+        onFocus={handleRequiredColumnsPause}
+        onBlur={handleRequiredColumnsResume}
+      >
         <button
           type="button"
           className="required-columns-toggle"

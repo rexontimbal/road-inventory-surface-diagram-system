@@ -6,6 +6,7 @@ import { clearUploadLog, fetchUploadLog, getUploadLogExportUrl } from '../../api
 import { showConfirm, showToast } from '../common/DialogProvider'
 import { writeLastSeenLogId } from '../../utils/uploadLogSeen'
 import { useModalLayer } from '../common/useModalLayer'
+import { getFullscreenPortalRoot } from '../../utils/fullscreenPortal'
 
 const ACTION_OPTIONS = [
   { value: 'all', label: 'All actions' },
@@ -464,6 +465,6 @@ export default function UploadHistoryModal({ onClose, triggerRef }) {
         </div>
       </div>
     </div>,
-    document.body
+    getFullscreenPortalRoot()
   )
 }

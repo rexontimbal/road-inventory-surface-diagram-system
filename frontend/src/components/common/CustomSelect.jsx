@@ -1,5 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { getFullscreenPortalRoot } from '../../utils/fullscreenPortal'
 
 const OPEN_EVENT = 'customselect:open'
 
@@ -290,7 +291,7 @@ export default function CustomSelect({
               })}
             </div>
           </div>,
-          document.body
+          getFullscreenPortalRoot()
         )}
     </>
   )

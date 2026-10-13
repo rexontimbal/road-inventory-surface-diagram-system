@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import Modal from './Modal'
+import { getFullscreenPortalRoot } from '../../utils/fullscreenPortal'
 
 let _confirmHandler = null
 let _alertHandler = null
@@ -40,6 +42,23 @@ export default function DialogProvider({ children }) {
   const [confirmState, setConfirmState] = useState(null)
   const [alertState, setAlertState] = useState(null)
   const [toasts, setToasts] = useState([])
+  // Re-renders on every fullscreen enter/exit so the toast portal below
+  // (which otherwise might not re-render around that exact moment) always
+  // targets the current getFullscreenPortalRoot() -- a toast fired while
+  // the diagram is truly fullscreen must land inside it to be seen at all.
+  const [, forceUpdate] = useState(0)
+
+  useEffect(() => {
+    function handleFullscreenChange() {
+      forceUpdate((n) => n + 1)
+    }
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange)
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange)
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange)
+    }
+  }, [])
 
   useEffect(() => {
     _confirmHandler = (opts) => setConfirmState(opts)
@@ -101,31 +120,34 @@ export default function DialogProvider({ children }) {
         />
       )}
 
-      <div className="toast-stack no-print">
-        {toasts.map((t) => (
-          <div key={t.id} className={`toast toast-${t.variant}`} role="status">
-            <span className="toast-icon" aria-hidden="true">
-              {TOAST_ICONS[t.variant] || TOAST_ICONS.info}
-            </span>
-            <span className="toast-message">{t.message}</span>
-            {t.actionLabel && (
-              <button
-                type="button"
-                className="toast-action"
-                onClick={() => {
-                  t.onAction?.()
-                  dismissToast(t.id)
-                }}
-              >
-                {t.actionLabel}
+      {createPortal(
+        <div className="toast-stack no-print">
+          {toasts.map((t) => (
+            <div key={t.id} className={`toast toast-${t.variant}`} role="status">
+              <span className="toast-icon" aria-hidden="true">
+                {TOAST_ICONS[t.variant] || TOAST_ICONS.info}
+              </span>
+              <span className="toast-message">{t.message}</span>
+              {t.actionLabel && (
+                <button
+                  type="button"
+                  className="toast-action"
+                  onClick={() => {
+                    t.onAction?.()
+                    dismissToast(t.id)
+                  }}
+                >
+                  {t.actionLabel}
+                </button>
+              )}
+              <button type="button" className="toast-close" onClick={() => dismissToast(t.id)} aria-label="Dismiss">
+                ×
               </button>
-            )}
-            <button type="button" className="toast-close" onClick={() => dismissToast(t.id)} aria-label="Dismiss">
-              ×
-            </button>
-          </div>
-        ))}
-      </div>
+            </div>
+          ))}
+        </div>,
+        getFullscreenPortalRoot()
+      )}
     </>
   )
 }

@@ -740,6 +740,13 @@ button:disabled {
   cursor: not-allowed;
   transform: none;
 }
+/* The browser's own default focus ring only responds to :focus, not
+   :focus-visible, so without this a mouse click leaves that native outline
+   sitting on the button (the custom box-shadow ring above only shows for
+   keyboard focus, as intended). */
+button:focus:not(:focus-visible) {
+  outline: none;
+}
 button:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35);
@@ -980,11 +987,16 @@ button:focus-visible {
 }
 .required-columns-chevron {
   display: inline-block;
-  color: var(--text-muted);
-  transition: transform 200ms ease;
+  font-size: 15px;
+  line-height: 1;
+  color: #64748b;
+  transition: transform 200ms ease, color 150ms ease;
 }
 .required-columns-chevron-open {
   transform: rotate(180deg);
+}
+.required-columns-toggle:hover .required-columns-chevron {
+  color: var(--accent);
 }
 .required-columns-collapse {
   display: grid;
@@ -1163,35 +1175,6 @@ button:focus-visible {
   white-space: normal;
   overflow-wrap: break-word;
 }
-.upload-summary-progress-track {
-  margin-top: 8px;
-  height: 2px;
-  border-radius: 1px;
-  background: var(--border);
-  overflow: hidden;
-}
-.upload-summary-progress-bar {
-  height: 100%;
-  width: 100%;
-  background: var(--accent);
-  transform-origin: left;
-  animation-name: upload-summary-shrink;
-  animation-timing-function: linear;
-  animation-fill-mode: forwards;
-}
-.upload-summary-card:hover .upload-summary-progress-bar,
-.upload-summary-card:focus-within .upload-summary-progress-bar {
-  animation-play-state: paused;
-}
-@keyframes upload-summary-shrink {
-  from {
-    transform: scaleX(1);
-  }
-  to {
-    transform: scaleX(0);
-  }
-}
-
 /* Feedback cards (upload results) */
 .feedback-card {
   display: flex;
@@ -1390,6 +1373,15 @@ button:focus-visible {
   color: #ffffff;
   background: #1c212c;
 }
+/* Wraps the label + sort icon so they're guaranteed to stay on one line
+   side by side (flex row) regardless of the <th>'s own table-cell layout --
+   setting display:inline-flex directly on a <th> would break its column
+   sizing, so it goes on this inner span instead. */
+.th-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
 .th-label {
   vertical-align: middle;
 }
@@ -1404,17 +1396,52 @@ button:focus-visible {
   color: #60a5fa;
 }
 
+/* No max-height / vertical scroll here anymore -- the box grows to fit
+   every row on the page (10 by default) and the PAGE scrolls if that's
+   ever too tall, rather than this one inner box getting its own scrollbar.
+   Horizontal-only: overflow-x:auto so .table-scroll still scrolls
+   sideways when TABLE_MIN_WIDTH (RoadInventoryTable.jsx) is wider than the
+   container, but never clips/scrolls vertically. */
 .inventory-table .table-scroll {
   overflow-x: auto;
-  overflow-y: auto;
-  max-height: 70vh;
+  overflow-y: visible;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
 }
+/* Not sticky anymore -- with no vertical scroll left inside .table-scroll
+   (above), there's nothing for a sticky header to stick against; it would
+   be fully inert at best and risk the exact floating-header bug from
+   before at worst (position:sticky still establishes a containing block
+   per its own computed overflow, independent of whether anything actually
+   scrolls). A plain static header is simpler and behaves identically in
+   the one case that matters here (no internal scroll). */
 .inventory-table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+  position: static;
+}
+/* Matches .table-scroll's own top-left corner radius -- the right side is
+   handled on .row-actions-header-cell below (it needs its own rule anyway
+   for the sticky-right override). */
+.inventory-table thead th:first-child {
+  border-top-left-radius: var(--radius-sm);
+}
+/* table-layout: fixed + the <colgroup> in RoadInventoryTable.jsx is what
+   actually guarantees column widths never move: under the default "auto"
+   layout, a column's width is recalculated from whatever its widest cell's
+   content currently needs, so swapping plain text for an edit input (wider)
+   on just ONE row could resize that column -- and since it's one column
+   shared by every row, that shift was visible on every OTHER row too, not
+   just the one being edited. Fixed layout ignores cell content for sizing
+   entirely; only the <colgroup>/<table> widths matter. The table itself is
+   width:100% + min-width:TABLE_MIN_WIDTH (both inline, from JS) rather than
+   one flat px value -- Road Name is the only column with no fixed width in
+   the colgroup, so it's the one that absorbs whatever space is left once
+   the table is stretched to 100% of a container wider than the minimum,
+   which is what makes the table (and its header) actually reach the card's
+   full width instead of stopping short with a gap on the right. Below the
+   minimum, .table-scroll scrolls horizontally instead of compressing any
+   column further. */
+.inventory-table table {
+  table-layout: fixed;
 }
 table {
   width: 100%;
@@ -1440,6 +1467,41 @@ td {
 .inventory-table table td:nth-child(3) {
   text-align: left;
 }
+/* Tighter horizontal padding + compact widths on the columns that don't
+   need much room, so the table's natural width stays close to common
+   viewport widths (1366px+) and horizontal scroll is rarely needed.
+   Position-coupled to the COLUMNS array order in RoadInventoryTable.jsx
+   (# / Road ID / Road Name / Start / End / Lanes / Surface / Left / Right /
+   Status / actions) -- keep both in sync if columns are reordered. */
+.inventory-table table th,
+.inventory-table table td {
+  padding: 9px 10px;
+}
+/* Short labels (see COLUMNS in RoadInventoryTable.jsx: "Lanes", "Surface",
+   "Left Shldr", ...) + nowrap + a slightly smaller size keep every header
+   on one line at any width -- the full name is still available via the
+   header's title tooltip. */
+.inventory-table thead th {
+  white-space: nowrap;
+  font-size: 12px;
+}
+/* Column widths now come entirely from the <colgroup> (RoadInventoryTable.jsx
+   COLUMNS) under table-layout: fixed -- this just handles the Road Name
+   column's overflow behavior within whatever width it ends up absorbing
+   (ellipsis + a title tooltip in JS for the full name). */
+.inventory-table table th:nth-child(3),
+.inventory-table table td:nth-child(3) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Optional below 1280px: the "#" row-index column is the least useful one
+   to keep on a cramped screen. */
+@media (max-width: 1279px) {
+  .inventory-table table th:nth-child(1),
+  .inventory-table table td:nth-child(1) {
+    display: none;
+  }
+}
 thead th {
   background: #10131a;
   color: #ffffff;
@@ -1464,13 +1526,68 @@ tbody tr:last-child td {
 
 /* Inline row editing */
 .row-actions-cell {
-  width: 1%;
+  /* Width comes from the <colgroup> now (96px, fixed, same as every other
+     column) -- one constant size for both the pencil (normal mode) and
+     Save+Cancel (edit mode), so entering/leaving edit never resizes this
+     column either. */
+  padding: 4px;
   white-space: nowrap;
+  /* Sticky on the right so the edit/Save/Cancel controls are never pushed
+     off-screen by the edit row's wider inputs -- needs its own opaque
+     background (matching whatever state the row is in) since scrolled
+     content would otherwise show through underneath it. */
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background: var(--surface);
+}
+tbody tr:hover .row-actions-cell {
+  background: var(--surface-sunken);
+}
+.editing-row .row-actions-cell {
+  background: var(--accent-soft);
+}
+/* Specificity note: written as .inventory-table thead th.row-actions-header-cell
+   (not just the bare class) so this still wins over the plain
+   ".inventory-table thead th { position: static }" rule above -- that rule
+   has two type selectors (thead, th) plus a class, which otherwise beats a
+   single-class selector regardless of source order. This cell keeps
+   sticky-right (horizontal only -- the header itself is no longer sticky
+   top at all, see above) so it still tracks the data rows' own sticky
+   actions column while scrolling sideways. border-top-right-radius matches
+   .table-scroll's own corner so the header's square cell doesn't show a
+   gap/mismatch against the wrapper's rounded top-right corner. */
+.inventory-table thead th.row-actions-header-cell {
+  padding: 4px;
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: #10131a;
+  border-top-right-radius: var(--radius-sm);
+}
+/* Just centers whichever control(s) are currently inside the (always-96px)
+   actions cell -- the pencil alone in normal mode, Save+Cancel side by side
+   in edit mode. No width of its own; the column's fixed width already
+   comes from the <colgroup>. */
+.row-actions-inner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  height: 28px;
+}
+/* Shown only once the table has actually scrolled horizontally (toggled
+   via JS, see handleTableScroll) -- signals "there's more hidden under
+   this column" instead of a permanent hard edge. */
+.table-scroll-has-overflow .row-actions-cell,
+.table-scroll-has-overflow .row-actions-header-cell {
+  box-shadow: -4px 0 6px -2px rgba(0, 0, 0, 0.15);
 }
 .row-edit-btn {
   visibility: hidden;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -1494,6 +1611,18 @@ tbody tr:hover .row-edit-btn,
 }
 .editing-row:hover {
   background: var(--accent-soft);
+}
+/* Vertical padding only (horizontal stays the 10px every other row uses) --
+   the 28px-tall edit controls plus the normal 9px top+bottom would make
+   this one row taller than every other row, which is exactly the kind of
+   shift this fix is supposed to eliminate. Reduced to 3px so the row's
+   total height lands back where plain text + 9px padding already puts it.
+   Harmless on this row's non-edited cells (Road ID, Status, ...) too --
+   their content is shorter than the row's resulting height either way, so
+   they just end up with a little extra centered space, not clipped text. */
+.inventory-table .editing-row td {
+  padding-top: 3px;
+  padding-bottom: 3px;
 }
 .row-action-btn {
   width: 26px;
@@ -1528,23 +1657,56 @@ tbody tr:hover .row-edit-btn,
 }
 .inline-edit-number {
   box-sizing: border-box;
-  width: 56px;
-  height: 32px;
-  padding: 0 6px;
+  width: 100%;
+  max-width: 56px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 4px;
   border: 1px solid var(--border-strong);
   border-radius: 6px;
   font-size: 13px;
   text-align: center;
   color: var(--text-primary);
   background: var(--surface);
+  /* Firefox: hides the native up/down spinner without disabling the arrow
+     keys, which still step the value regardless of whether its buttons are
+     visibly drawn. */
+  -moz-appearance: textfield;
+}
+.inline-edit-number::-webkit-outer-spin-button,
+.inline-edit-number::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 .inline-edit-number:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
+/* Compact "sm" sizing, matching the sidebar/filter-bar's own .custom-select-sm
+   variant -- without this the trigger falls back to the generic unsized
+   <button> rule (9px/14px padding, no fixed height), which is what made the
+   edit row balloon wide enough to push Save/Cancel off-screen. */
 .inline-edit-select {
-  width: 120px;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 400;
+}
+/* A smaller chevron fits the compact trigger better -- the SVG's own
+   width/height attributes (14px) are overridden here rather than changed
+   in CustomSelect.jsx, since every other consumer of that component still
+   wants the default size. */
+.inline-edit-select .custom-select-chevron {
+  width: 12px;
+  height: 12px;
 }
 
 .status-badge {
@@ -1857,6 +2019,50 @@ tbody tr:hover .row-edit-btn,
 #diagram-canvas {
   display: block;
   border-radius: 4px;
+}
+
+/* Pairs the canvas with a sticky HTML copy of its own baked-in row labels
+   (see getRowLabelLayout in diagramRenderer.js) so "Shoulder"/"Lane N" stay
+   on screen while .diagram-canvas-wrap scrolls the canvas horizontally --
+   the canvas's own painted labels are still there underneath, just covered
+   by this opaque column instead of removed. */
+.diagram-canvas-scroll-area {
+  display: flex;
+  align-items: flex-start;
+}
+/* Reserves zero width in the flex row -- without this, the sticky column
+   below would sit BESIDE the canvas (pushing it right) instead of directly
+   OVER the canvas's own identical margin, which is what caused the labels
+   to render twice. overflow: visible lets its child draw past this 0px box. */
+.diagram-row-labels-anchor {
+  width: 0;
+  overflow: visible;
+  flex-shrink: 0;
+}
+.diagram-row-labels {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: #ffffff; /* matches the canvas's own fixed white background exactly */
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  transition: box-shadow 150ms ease;
+}
+/* Shadow (not a border, and not shown at rest) only once the canvas has
+   actually scrolled out from under this column -- signals "there's more
+   content hidden to the left" instead of permanently implying a hard edge. */
+.diagram-row-labels-scrolled {
+  box-shadow: 2px 0 6px rgba(0, 0, 0, 0.15);
+}
+.diagram-row-label {
+  position: absolute;
+  left: 0;
+  right: 6px;
+  display: block;
+  text-align: right;
+  font-family: sans-serif;
+  color: #000000;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .legend {

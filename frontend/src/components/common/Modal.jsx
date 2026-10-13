@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useModalLayer } from './useModalLayer'
+import { getFullscreenPortalRoot } from '../../utils/fullscreenPortal'
 
 const ICONS = {
   danger: (
@@ -129,6 +130,6 @@ export default function Modal({
         </div>
       </div>
     </div>,
-    document.body
+    getFullscreenPortalRoot()
   )
 }

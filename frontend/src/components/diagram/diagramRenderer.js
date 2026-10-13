@@ -11,8 +11,22 @@ const MIN_PX_PER_INTERVAL = 90
 // label would start closer than this to the previous one's right edge, it
 // is skipped (the tick mark still draws) rather than letting text overlap.
 const LABEL_MIN_GAP_PX = 6
+// Conservative, widely-supported ceiling on a single <canvas> dimension
+// (actual browser limits vary higher, but this stays safely under all of
+// them). A very long multi-strip road at a high scale (devicePixelRatio *
+// zoom, or the print/export HD factors) could otherwise ask for a backing
+// store past what the browser allows, which silently fails to render
+// rather than erroring -- renderDiagram/renderSingleStrip clamp the
+// requested scale down before that happens, trading a bit of sharpness for
+// never just not rendering at all. True tiling would avoid the tradeoff
+// entirely but isn't implemented.
+const MAX_CANVAS_DIMENSION_PX = 8192
 const LEFT_MARGIN = 90
-const RIGHT_MARGIN = 20
+// Fallback only -- computeRightMargin() below sizes this per-diagram from
+// the actual widest terminal label, since a flat value is either wasted
+// space (short labels) or too narrow and clips the text (long labels, e.g.
+// 3-digit kilometer counts).
+const RIGHT_MARGIN_FALLBACK = 20
 const TOP_MARGIN = 10
 const HEADER_H = 24
 const STATUS_STRIP_H = 6
@@ -25,6 +39,13 @@ const ARROW_SPACING_PX = 70
 const MARKED_SURFACES = new Set(['asphalt', 'paved']) // surfaces with painted lane markings
 const STATUS_DONE_COLOR = '#0ca30c'
 const STATUS_NOT_DONE_COLOR = '#d03b3b'
+// Matches the app's own body font stack (index.css) -- a named system font
+// hints more consistently than a bare "sans-serif" fallback, which some
+// engines substitute with a less-hinted/blurrier default face.
+const STATION_FONT = '11px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif'
+// Extra breathing room beyond half the widest label's width, so the glyph's
+// own side-bearing/antialiasing never reads as touching the canvas edge.
+const LABEL_EDGE_PADDING_PX = 8
 
 function formatStationLabel(meters) {
   const km = Math.floor(meters / 1000)
@@ -32,11 +53,47 @@ function formatStationLabel(meters) {
   return `Sta. ${km}+${String(m).padStart(3, '0')}`
 }
 
+// A throwaway canvas used purely for ctx.measureText() -- lets margins be
+// sized from the real rendered width of the widest label *before* the
+// target canvas's own width (and therefore its context, which resets on
+// resize) is known.
+let measureCtx = null
+function getMeasureCtx() {
+  if (!measureCtx) {
+    measureCtx = document.createElement('canvas').getContext('2d')
+  }
+  measureCtx.font = STATION_FONT
+  return measureCtx
+}
+
+// The right-edge tick of every strip sits at the same x (stripWidthPx from
+// the strip's own origin), and that final label is center-anchored on it --
+// so it's the single place that can clip against the canvas's right edge.
+// Measuring the actual widest terminal label (rather than assuming a flat
+// margin) keeps the reserved space exact: never so narrow it clips a long
+// label, never so wide it wastes space on a short one.
+function computeRightMargin(numStrips, baseM, stripSpanM, totalLengthM) {
+  if (numStrips === 0) return RIGHT_MARGIN_FALLBACK
+  const ctx = getMeasureCtx()
+  let maxWidth = 0
+  for (let s = 0; s < numStrips; s++) {
+    const stripEndM = Math.min(baseM + (s + 1) * stripSpanM, baseM + totalLengthM)
+    const w = ctx.measureText(formatStationLabel(stripEndM)).width
+    if (w > maxWidth) maxWidth = w
+  }
+  return Math.ceil(maxWidth / 2) + LABEL_EDGE_PADDING_PX
+}
+
 // Round to whole device pixels so adjacent clipped segments share an exact
 // edge (no 1px seams/overlaps from independently-rounded floats) and strokes
 // render crisp instead of anti-aliased/blurry.
 function px(v) {
   return Math.round(v)
+}
+
+function clampScaleToCanvasLimit(logicalWidth, logicalHeight, scale) {
+  const maxScale = Math.min(MAX_CANVAS_DIMENSION_PX / logicalWidth, MAX_CANVAS_DIMENSION_PX / logicalHeight)
+  return Math.min(scale, maxScale)
 }
 
 // Shared layout math used by both the combined multi-strip canvas (on-screen
@@ -64,7 +121,9 @@ function computeStripPlan(road, settings, range) {
   const laneBandH = globalMaxLanes * LANE_H
   const stripHeight = HEADER_H + STATUS_STRIP_H + SHOULDER_H + laneBandH + SHOULDER_H
   const stripWidthPx = Math.max(BASE_STRIP_WIDTH_PX, stationsPerLine * MIN_PX_PER_INTERVAL)
-  const canvasWidth = LEFT_MARGIN + stripWidthPx + RIGHT_MARGIN
+  const rightMargin = computeRightMargin(numStrips, baseM, stripSpanM, totalLengthM)
+  const canvasWidth = LEFT_MARGIN + stripWidthPx + rightMargin
+  const canvasHeight = numStrips > 0 ? TOP_MARGIN + numStrips * stripHeight + (numStrips - 1) * STRIP_GAP + 10 : 0
   return {
     stripSpanM,
     totalLengthM,
@@ -73,32 +132,82 @@ function computeStripPlan(road, settings, range) {
     laneBandH,
     stripHeight,
     stripWidthPx,
+    rightMargin,
     canvasWidth,
+    canvasHeight,
     baseM,
     relevantSegments,
   }
+}
+
+// The canvas's LOGICAL (CSS-pixel) size -- i.e. what canvas.width/height
+// would be at scale=1 -- independent of both devicePixelRatio and zoom.
+// Callers that need to size a <canvas> element's CSS display box (as
+// opposed to its backing-store resolution) use this rather than reading
+// canvas.width/height back off a canvas that may have been rendered at a
+// higher backing-store scale for sharpness.
+export function getCanvasLogicalSize(road, settings, range) {
+  const plan = computeStripPlan(road, settings, range)
+  if (plan.totalLengthM <= 0 || plan.relevantSegments.length === 0) {
+    return { width: 0, height: 0 }
+  }
+  return { width: plan.canvasWidth, height: plan.canvasHeight }
 }
 
 export function getNumStrips(road, settings, range) {
   return computeStripPlan(road, settings, range).numStrips
 }
 
+// Pixel positions (in the same native canvas coordinate space renderDiagram
+// draws into) of the "Shoulder"/"Lane N" row labels baked into the left
+// margin of the combined canvas. Used to render a matching sticky HTML
+// overlay for the on-screen view only -- the canvas bitmap itself (and
+// therefore fullscreen/print/export, which all reuse or rescale that same
+// bitmap) is untouched, so this never risks diverging from them.
+export function getRowLabelLayout(road, settings, range) {
+  const plan = computeStripPlan(road, settings, range)
+  if (plan.totalLengthM <= 0 || plan.relevantSegments.length === 0) {
+    return { labels: [], leftWidth: LEFT_MARGIN, totalHeight: 0 }
+  }
+  const { numStrips, globalMaxLanes, laneBandH, stripHeight } = plan
+  const labels = []
+  for (let s = 0; s < numStrips; s++) {
+    const y0 = TOP_MARGIN + s * (stripHeight + STRIP_GAP)
+    const topShoulderY = y0 + HEADER_H + STATUS_STRIP_H
+    const laneBandTop = topShoulderY + SHOULDER_H
+    labels.push({ key: `${s}-shoulder-top`, text: 'Shoulder', top: topShoulderY, height: SHOULDER_H })
+    for (let li = 0; li < globalMaxLanes; li++) {
+      labels.push({ key: `${s}-lane-${li}`, text: `Lane ${li + 1}`, top: laneBandTop + li * LANE_H, height: LANE_H })
+    }
+    labels.push({ key: `${s}-shoulder-bottom`, text: 'Shoulder', top: laneBandTop + laneBandH, height: SHOULDER_H })
+  }
+  return { labels, leftWidth: LEFT_MARGIN, totalHeight: plan.canvasHeight }
+}
+
 // Renders exactly one strip (one page's worth) onto `canvas`, sized to fit
 // just that strip -- used for print, where each strip becomes its own page
 // instead of one tall image the browser would otherwise paginate awkwardly
 // (leaving a near-blank leading page before the image "fits").
-export function renderSingleStrip(canvas, road, settings, stripIndex, range) {
+// `scale` multiplies the canvas's backing-store resolution (devicePixelRatio
+// and/or an explicit HD-export factor) while every drawing coordinate below
+// stays in the same logical units as before -- ctx.setTransform makes the
+// whole canvas denser without the layout math needing to know or care.
+export function renderSingleStrip(canvas, road, settings, stripIndex, range, scale = 1) {
   const ctx = canvas.getContext('2d')
   const plan = computeStripPlan(road, settings, range)
   const pxPerMeter = plan.stripWidthPx / plan.stripSpanM
+  const logicalWidth = plan.canvasWidth
+  const logicalHeight = TOP_MARGIN + plan.stripHeight + 10
+  const clampedScale = clampScaleToCanvasLimit(logicalWidth, logicalHeight, scale)
 
-  canvas.width = plan.canvasWidth
-  canvas.height = TOP_MARGIN + plan.stripHeight + 10
+  canvas.width = Math.round(logicalWidth * clampedScale)
+  canvas.height = Math.round(logicalHeight * clampedScale)
+  ctx.setTransform(clampedScale, 0, 0, clampedScale, 0, 0)
 
   ctx.fillStyle = '#FFFFFF'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.fillRect(0, 0, logicalWidth, logicalHeight)
   ctx.textBaseline = 'middle'
-  ctx.font = '11px sans-serif'
+  ctx.font = STATION_FONT
 
   const stripStartM = plan.baseM + stripIndex * plan.stripSpanM
   const stripEndM = Math.min(plan.baseM + (stripIndex + 1) * plan.stripSpanM, plan.baseM + plan.totalLengthM)
@@ -114,6 +223,7 @@ export function renderSingleStrip(canvas, road, settings, stripIndex, range) {
     globalMaxLanes: plan.globalMaxLanes,
     laneBandH: plan.laneBandH,
     hitRegions: [],
+    scale: clampedScale,
   })
 }
 
@@ -126,8 +236,12 @@ export function renderSingleStrip(canvas, road, settings, stripIndex, range) {
  * `range` (optional) = { startM, endM } to restrict the diagram to a station
  *   sub-range of the road, clipping segments at the boundaries and starting
  *   station labels from `startM` instead of 0.
+ * `scale` (default 1) multiplies the canvas's backing-store resolution --
+ * pass devicePixelRatio for a crisp on-screen render, devicePixelRatio*zoom
+ * to re-render (rather than CSS-stretch) a zoomed view, or a flat HD/export
+ * factor -- without changing any of the logical layout coordinates below.
  */
-export function renderDiagram(canvas, road, settings, range) {
+export function renderDiagram(canvas, road, settings, range, scale = 1) {
   const ctx = canvas.getContext('2d')
   const { stationIntervalM } = settings
   const plan = computeStripPlan(road, settings, range)
@@ -139,16 +253,20 @@ export function renderDiagram(canvas, road, settings, range) {
     return { hitRegions: [] }
   }
 
-  const { numStrips, globalMaxLanes, laneBandH, stripHeight, stripWidthPx, stripSpanM, canvasWidth, baseM } = plan
+  const { numStrips, globalMaxLanes, laneBandH, stripHeight, stripWidthPx, stripSpanM, canvasWidth, canvasHeight, baseM } = plan
   const pxPerMeter = stripWidthPx / stripSpanM
+  const logicalWidth = canvasWidth
+  const logicalHeight = canvasHeight
+  const clampedScale = clampScaleToCanvasLimit(logicalWidth, logicalHeight, scale)
 
-  canvas.width = canvasWidth
-  canvas.height = TOP_MARGIN + numStrips * stripHeight + (numStrips - 1) * STRIP_GAP + 10
+  canvas.width = Math.round(logicalWidth * clampedScale)
+  canvas.height = Math.round(logicalHeight * clampedScale)
+  ctx.setTransform(clampedScale, 0, 0, clampedScale, 0, 0)
 
   ctx.fillStyle = '#FFFFFF'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.fillRect(0, 0, logicalWidth, logicalHeight)
   ctx.textBaseline = 'middle'
-  ctx.font = '11px sans-serif'
+  ctx.font = STATION_FONT
 
   const hitRegions = []
 
@@ -170,6 +288,7 @@ export function renderDiagram(canvas, road, settings, range) {
       globalMaxLanes,
       laneBandH,
       hitRegions,
+      scale: clampedScale,
     })
   }
 
@@ -188,6 +307,7 @@ function drawStrip(ctx, cfg) {
     globalMaxLanes,
     laneBandH,
     hitRegions,
+    scale,
   } = cfg
 
   const statusStripY = y0 + HEADER_H
@@ -251,7 +371,7 @@ function drawStrip(ctx, cfg) {
     ctx.fillRect(x, statusStripY, w, STATUS_STRIP_H)
 
     // Top shoulder
-    paintCell(ctx, x, topShoulderY, w, SHOULDER_H, seg.shoulder_right)
+    paintCell(ctx, x, topShoulderY, w, SHOULDER_H, seg.shoulder_right, scale)
     if (MARKED_SURFACES.has(seg.shoulder_right)) {
       drawRumbleStrip(ctx, x, w, topShoulderY + SHOULDER_H, 'down')
     }
@@ -260,12 +380,12 @@ function drawStrip(ctx, cfg) {
     const offset = Math.floor((globalMaxLanes - seg.num_lanes) / 2)
     for (let li = 0; li < seg.num_lanes; li++) {
       const y = laneBandTop + (offset + li) * LANE_H
-      paintCell(ctx, x, y, w, LANE_H, seg.surface_type)
+      paintCell(ctx, x, y, w, LANE_H, seg.surface_type, scale)
     }
 
     // Bottom shoulder
     const bottomShoulderY = laneBandTop + laneBandH
-    paintCell(ctx, x, bottomShoulderY, w, SHOULDER_H, seg.shoulder_left)
+    paintCell(ctx, x, bottomShoulderY, w, SHOULDER_H, seg.shoulder_left, scale)
     if (MARKED_SURFACES.has(seg.shoulder_left)) {
       drawRumbleStrip(ctx, x, w, bottomShoulderY, 'up')
     }
@@ -274,10 +394,14 @@ function drawStrip(ctx, cfg) {
       drawLaneMarkings(ctx, { x, w, laneBandTop, offset, numLanes: seg.num_lanes })
     }
 
-    // Outer border around the full column (shoulder-to-shoulder)
+    // Outer border around the full column (shoulder-to-shoulder). Offset by
+    // 0.5px so this 1px-wide stroke's centerline lands on a pixel boundary
+    // instead of straddling one (which is what makes a 1px canvas line
+    // render as a soft 2px blur) -- the fills above keep their exact
+    // boundaries; only the stroke itself is inset.
     ctx.strokeStyle = BORDER_COLOR
     ctx.lineWidth = 1
-    ctx.strokeRect(x, topShoulderY, w, SHOULDER_H + laneBandH + SHOULDER_H)
+    ctx.strokeRect(x + 0.5, topShoulderY + 0.5, w - 1, SHOULDER_H + laneBandH + SHOULDER_H - 1)
 
     hitRegions.push({
       x,
@@ -396,8 +520,8 @@ function drawArrowsAlong(ctx, x, w, y, pointsRight) {
   }
 }
 
-function paintCell(ctx, x, y, w, h, surfaceType) {
-  ctx.fillStyle = fillForCell(ctx, surfaceType, x, y, w, h)
+function paintCell(ctx, x, y, w, h, surfaceType, scale = 1) {
+  ctx.fillStyle = fillForCell(ctx, surfaceType, x, y, w, h, scale)
   ctx.fillRect(x, y, w, h)
   ctx.strokeStyle = BORDER_COLOR
   ctx.lineWidth = 0.5

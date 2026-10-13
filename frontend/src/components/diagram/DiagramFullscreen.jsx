@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { formatStation } from '../../utils/chainage'
 import Legend from './Legend'
 import { useModalLayer } from '../common/useModalLayer'
+import { useDevicePixelRatio } from '../../utils/useDevicePixelRatio'
+import { renderDiagram, getCanvasLogicalSize } from './diagramRenderer'
 
 const ZOOM_MIN = 0.25
 const ZOOM_MAX = 3
@@ -13,49 +14,97 @@ function clampZoom(z) {
   return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z))
 }
 
+function exitBrowserFullscreen() {
+  const exit = document.exitFullscreen || document.webkitExitFullscreen
+  if ((document.fullscreenElement || document.webkitFullscreenElement) && exit) {
+    return exit.call(document).catch(() => {})
+  }
+  return Promise.resolve()
+}
+
 /**
- * Full-viewport diagram view. Renders its own canvas but never re-runs the
- * strip-layout math -- it copies the bitmap that DiagramPanel's own canvas
- * already rendered (ctx.drawImage), so zoom is pure CSS sizing of a canvas
- * rendered once at native resolution. That's also why station labels never
- * overlap at any zoom level: the whole bitmap (text included) scales
- * uniformly, so spacing that doesn't collide at 100% can't collide at 40%
- * or 300% either. Print/Export PNG are the exact same functions DiagramPanel
- * already uses on its own canvas, so fullscreen can never produce different
- * output than the normal view.
+ * Full-viewport diagram view. Uses the exact same renderDiagram/layout math
+ * as the normal view (same hitRegions, same label collision handling, same
+ * everything) -- it just renders into its own canvas at a different scale,
+ * so station labels that don't overlap at 100% can't overlap at 40% or
+ * 300% either, and Print/Export PNG are the same functions DiagramPanel
+ * uses on its own canvas.
+ *
+ * Not portaled to document.body here -- DiagramPanel renders this inside a
+ * persistent, always-mounted anchor element and calls the real
+ * element.requestFullscreen() on THAT anchor synchronously from the user's
+ * click/keypress (required by the Fullscreen API; this component mounts a
+ * moment later via React, too late for that same call to count as
+ * user-gesture-initiated). Its own position:fixed/inset:0 styling still
+ * makes it cover the full viewport exactly as before, both when true
+ * fullscreen engages and as the in-window fallback when it doesn't.
+ *
+ * Re-renders its own canvas (via the same renderDiagram the normal view
+ * uses) at devicePixelRatio*zoom whenever either changes, rather than
+ * copying one fixed-resolution bitmap and CSS-stretching it to zoom --
+ * that's what used to make zoomed-in text/lines/hatching look soft here
+ * even though the normal view (at 100%, no stretch) looked fine.
  */
-export default function DiagramFullscreen({ road, completion, sourceCanvas, hitRegions, onClose, onPrint, onExportPng, triggerRef }) {
+export default function DiagramFullscreen({ road, completion, onClose, onPrint, onExportPng, triggerRef }) {
+  const dpr = useDevicePixelRatio()
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
   const dragRef = useRef(null)
+  const hitRegionsRef = useRef([])
   const [zoom, setZoom] = useState(1)
   const [fitMode, setFitMode] = useState(true)
+  const fitModeRef = useRef(fitMode)
   const [tooltip, setTooltip] = useState(null)
   const [ready, setReady] = useState(false)
   const [closing, setClosing] = useState(false)
   const [dragging, setDragging] = useState(false)
+  // Logical (CSS-pixel, scale-independent) size of the diagram -- the same
+  // layout dimensions the normal view's canvas would have at 100%/1x. Zoom
+  // and dpr only ever affect the canvas's backing-store resolution and its
+  // CSS display size (nativeWidth*zoom below), never this.
+  const [logicalSize, setLogicalSize] = useState({ width: 0, height: 0 })
   // Even though fullscreen is usually opened from the normal page (not
   // nested under another modal), it still joins the shared stack -- if a
   // confirm/alert ever opens from within it, that needs to render ON TOP,
   // which only works if both participate in the same ordering.
   const { zIndex, isTop } = useModalLayer()
 
-  const nativeWidth = sourceCanvas?.width || 0
-  const nativeHeight = sourceCanvas?.height || 0
+  const nativeWidth = logicalSize.width
+  const nativeHeight = logicalSize.height
+  // Guards against double-closing: our own exit button calls exitFullscreen
+  // (below) AND that itself fires fullscreenchange, which would otherwise
+  // call requestClose a second time.
+  const closingRef = useRef(false)
 
   function requestClose() {
+    if (closingRef.current) return
+    closingRef.current = true
+    exitBrowserFullscreen()
     setClosing(true)
     setTimeout(onClose, CLOSE_ANIMATION_MS)
   }
 
-  // Copy the already-rendered bitmap once per diagram -- no re-layout here.
+  // The logical layout size depends only on the road/settings/range -- not
+  // on zoom or dpr -- so it's computed separately from the render effect
+  // below, which re-runs far more often (every zoom step).
+  useEffect(() => {
+    if (!road) {
+      setLogicalSize({ width: 0, height: 0 })
+      return
+    }
+    setLogicalSize(getCanvasLogicalSize(road.roadDetail, road.settings, road.range))
+  }, [road])
+
+  // Re-renders (not CSS-stretches) at devicePixelRatio*zoom -- the canvas's
+  // CSS display size is set separately below (nativeWidth*zoom, logical
+  // units), so this only ever changes how much actual pixel detail backs
+  // that same displayed size.
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas || !sourceCanvas || !nativeWidth) return
-    canvas.width = nativeWidth
-    canvas.height = nativeHeight
-    canvas.getContext('2d').drawImage(sourceCanvas, 0, 0)
-  }, [sourceCanvas, nativeWidth, nativeHeight])
+    if (!canvas || !road || !nativeWidth) return
+    const result = renderDiagram(canvas, road.roadDetail, road.settings, road.range, dpr * zoom)
+    hitRegionsRef.current = result?.hitRegions || []
+  }, [road, nativeWidth, zoom, dpr])
 
   function computeFitZoom() {
     const container = containerRef.current
@@ -82,16 +131,45 @@ export default function DiagramFullscreen({ road, completion, sourceCanvas, hitR
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitMode, nativeWidth])
 
-  // Fullscreen API as a best-effort enhancement -- the CSS overlay is the
-  // real mechanism and works regardless of whether the browser grants it.
+  // Keeps a ref mirror of fitMode for the fullscreenchange listener below,
+  // which is registered once ([] deps) and would otherwise close over a
+  // stale value.
+  useEffect(() => {
+    fitModeRef.current = fitMode
+  }, [fitMode])
+
+  // DiagramPanel already called element.requestFullscreen() synchronously
+  // on its anchor before this mounted -- this just reacts to the result:
+  // re-fits once the transition lands (true fullscreen hands over more
+  // viewport than the windowed browser had), and syncs the app's own state
+  // closed if the user exits via Esc, F11, or any other OS/browser-native
+  // path that bypasses our own exit button entirely.
+  useEffect(() => {
+    function handleFullscreenChange() {
+      const inFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement)
+      if (inFullscreen) {
+        if (fitModeRef.current) setZoom(computeFitZoom())
+      } else if (!closingRef.current) {
+        requestClose()
+      }
+    }
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange)
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange)
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Body scroll lock + Esc/F to close + return focus, same pattern as every
-  // other overlay in this app.
+  // other overlay in this app. Esc also triggers the browser's own native
+  // exit-fullscreen behavior (not cancelable) -- that's handled by the
+  // fullscreenchange listener above; this handler covers F, and Esc for the
+  // in-window fallback case where true fullscreen never actually engaged.
   useEffect(() => {
     const prevOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    if (document.documentElement.requestFullscreen) {
-      document.documentElement.requestFullscreen().catch(() => {})
-    }
 
     function handleKeyDown(e) {
       if (!isTop()) return
@@ -104,7 +182,6 @@ export default function DiagramFullscreen({ road, completion, sourceCanvas, hitR
     return () => {
       document.removeEventListener('keydown', handleKeyDown)
       document.body.style.overflow = prevOverflow
-      if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
       triggerRef?.current?.focus?.()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -121,6 +198,16 @@ export default function DiagramFullscreen({ road, completion, sourceCanvas, hitR
   function fitToScreen() {
     setFitMode(true)
     setZoom(computeFitZoom())
+  }
+
+  // Browsers can't reliably show the print dialog/preview while a true
+  // Fullscreen-API session is active, so leave it first and only then hand
+  // off to the same print function the normal view uses. Exiting fires
+  // fullscreenchange, which (via the listener above) closes this view back
+  // to the normal page -- same as pressing Esc, just triggered by Print.
+  async function handlePrintClick() {
+    await exitBrowserFullscreen()
+    onPrint()
   }
 
   function handleMouseDown(e) {
@@ -150,14 +237,16 @@ export default function DiagramFullscreen({ road, completion, sourceCanvas, hitR
   }, [])
 
   function handleCanvasMouseMove(e) {
-    if (dragRef.current || !hitRegions || !canvasRef.current) return
+    if (dragRef.current || !hitRegionsRef.current.length || !canvasRef.current) return
     const rect = canvasRef.current.getBoundingClientRect()
     if (!rect.width || !rect.height) return
-    const scaleX = nativeWidth / rect.width
-    const scaleY = nativeHeight / rect.height
-    const nx = (e.clientX - rect.left) * scaleX
-    const ny = (e.clientY - rect.top) * scaleY
-    const region = hitRegions.find((r) => nx >= r.x && nx <= r.x + r.w && ny >= r.y && ny <= r.y + r.h)
+    // hitRegions are in logical units; the canvas's CSS size is always
+    // nativeWidth*zoom (logical * zoom), so dividing by zoom alone recovers
+    // logical coordinates regardless of the canvas's actual backing-store
+    // resolution (dpr*zoom) -- no dependency on measuring rect.width at all.
+    const nx = (e.clientX - rect.left) / zoom
+    const ny = (e.clientY - rect.top) / zoom
+    const region = hitRegionsRef.current.find((r) => nx >= r.x && nx <= r.x + r.w && ny >= r.y && ny <= r.y + r.h)
     if (!region) {
       setTooltip(null)
       return
@@ -180,7 +269,7 @@ export default function DiagramFullscreen({ road, completion, sourceCanvas, hitR
 
   const canOverflow = nativeWidth * zoom > (containerRef.current?.clientWidth || 0) || nativeHeight * zoom > (containerRef.current?.clientHeight || 0)
 
-  return createPortal(
+  return (
     <div
       className={`diagram-fullscreen-overlay no-print${ready && !closing ? ' diagram-fullscreen-ready' : ''}${closing ? ' diagram-fullscreen-closing' : ''}`}
       style={{ zIndex: zIndex ?? 3000 }}
@@ -222,7 +311,7 @@ export default function DiagramFullscreen({ road, completion, sourceCanvas, hitR
           <button type="button" className="btn-compact fullscreen-fit-btn" onClick={fitToScreen}>
             Fit to screen
           </button>
-          <button type="button" className="btn-compact" onClick={onPrint}>
+          <button type="button" className="btn-compact" onClick={handlePrintClick}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M6 9V4h12v5M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2M6 14h12v6H6z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
@@ -288,7 +377,6 @@ export default function DiagramFullscreen({ road, completion, sourceCanvas, hitR
           </div>
         </div>
       )}
-    </div>,
-    document.body
+    </div>
   )
 }
