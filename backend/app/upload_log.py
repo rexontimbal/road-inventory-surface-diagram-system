@@ -124,7 +124,11 @@ def _matches_filters(entry: UploadLogEntry, search: str | None, action: str | No
     if search:
         s = search.strip().lower()
         if s:
-            haystack = [entry.file_name or ""] + [d.get("road_id", "") for d in details]
+            haystack = [entry.file_name or ""] + [
+                v
+                for d in details
+                for v in (d.get("road_id", ""), d.get("road_name", ""), d.get("change_summary") or "")
+            ]
             if not any(s in h.lower() for h in haystack):
                 return False
     return True
