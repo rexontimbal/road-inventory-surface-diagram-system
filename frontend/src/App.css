@@ -1531,19 +1531,17 @@ tbody tr:last-child td {
      which previously let this column size below its own Save+Cancel
      buttons' actual width, or let Status next to it claim the space
      instead). One constant size for both the pencil (normal mode) and
-     Save+Cancel (edit mode), so entering/leaving edit never resizes it. */
+     Save+Cancel (edit mode), so entering/leaving edit never resizes it.
+     A normal in-flow column (not sticky) -- sticky-right used to paint
+     this cell over the Status column during horizontal scroll since the
+     two don't share the same scroll-shifted position; startEdit's own
+     auto-scroll-into-view (see scrollEditedRowIntoView in
+     RoadInventoryTable.jsx) is what keeps Save/Cancel reachable now. */
   width: 84px;
   min-width: 84px;
   max-width: 84px;
   padding: 4px;
   white-space: nowrap;
-  /* Sticky on the right so the edit/Save/Cancel controls are never pushed
-     off-screen by the edit row's wider inputs -- needs its own opaque
-     background (matching whatever state the row is in) since scrolled
-     content would otherwise show through underneath it. */
-  position: sticky;
-  right: 0;
-  z-index: 1;
   background: var(--surface);
 }
 tbody tr:hover .row-actions-cell {
@@ -1556,20 +1554,14 @@ tbody tr:hover .row-actions-cell {
    (not just the bare class) so this still wins over the plain
    ".inventory-table thead th { position: static }" rule above -- that rule
    has two type selectors (thead, th) plus a class, which otherwise beats a
-   single-class selector regardless of source order. This cell keeps
-   sticky-right (horizontal only -- the header itself is no longer sticky
-   top at all, see above) so it still tracks the data rows' own sticky
-   actions column while scrolling sideways. border-top-right-radius matches
-   .table-scroll's own corner so the header's square cell doesn't show a
-   gap/mismatch against the wrapper's rounded top-right corner. */
+   single-class selector regardless of source order. border-top-right-radius
+   matches .table-scroll's own corner so the header's square cell doesn't
+   show a gap/mismatch against the wrapper's rounded top-right corner. */
 .inventory-table thead th.row-actions-header-cell {
   width: 84px;
   min-width: 84px;
   max-width: 84px;
   padding: 4px;
-  position: sticky;
-  right: 0;
-  z-index: 2;
   background: #10131a;
   border-top-right-radius: var(--radius-sm);
 }
@@ -1583,13 +1575,6 @@ tbody tr:hover .row-actions-cell {
   gap: 4px;
   width: 100%;
   height: 28px;
-}
-/* Shown only once the table has actually scrolled horizontally (toggled
-   via JS, see handleTableScroll) -- signals "there's more hidden under
-   this column" instead of a permanent hard edge. */
-.table-scroll-has-overflow .row-actions-cell,
-.table-scroll-has-overflow .row-actions-header-cell {
-  box-shadow: -4px 0 6px -2px rgba(0, 0, 0, 0.15);
 }
 .row-edit-btn {
   visibility: hidden;
