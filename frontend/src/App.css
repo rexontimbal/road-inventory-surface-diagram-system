@@ -1020,117 +1020,9 @@ button:focus-visible {
   margin-bottom: 2px;
 }
 
-/* Unified upload-summary card: collapsed and expanded share the same
-   outer card (border/background/radius/padding); only content height
-   changes, so "View details"/"Minimize" never float outside the card. */
-.upload-summary-card {
-  margin-top: 12px;
-  padding: 10px 12px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface-sunken);
-}
-.upload-summary-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.upload-summary-header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex: 1;
-}
-.upload-summary-icon {
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: var(--surface);
-}
-.upload-summary-icon-good {
-  background: var(--good);
-}
-.upload-summary-icon-critical {
-  background: var(--critical);
-}
-.upload-summary-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  overflow-wrap: break-word;
-}
-.upload-summary-toggle {
-  flex-shrink: 0;
-  margin-left: auto;
-  background: none;
-  border: none;
-  padding: 2px 0;
-  color: var(--accent);
-  font-size: 0.72rem;
-}
-.upload-summary-toggle:hover {
-  background: none;
-  border-color: transparent;
-  color: var(--accent-hover);
-  text-decoration: underline;
-}
-.upload-summary-body {
-  max-height: 0;
-  opacity: 0;
-  overflow: hidden;
-  transition: max-height 200ms ease, opacity 200ms ease;
-}
-.upload-summary-body-open {
-  max-height: 260px;
-  opacity: 1;
-}
-.upload-summary-body-inner {
-  max-height: 220px;
-  overflow-y: auto;
-  padding-top: 10px;
-  margin-top: 8px;
-  border-top: 1px solid var(--border);
-}
-.upload-summary-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-}
-.upload-summary-row {
-  padding: 7px 0;
-  border-top: 1px solid var(--border);
-}
-.upload-summary-row:first-child {
-  padding-top: 0;
-  border-top: none;
-}
-.upload-summary-row-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
-  font-size: 0.78rem;
-}
-.upload-summary-count {
-  color: var(--text-muted);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-.upload-summary-row-right {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
+/* Badge classes are shared with UploadHistoryModal's collapsed-row and
+   expanded-panel badges -- keep these even though the upload-summary card
+   itself (the structural wrapper that used to render them here) is gone. */
 .upload-summary-badge {
   flex-shrink: 0;
   padding: 1px 7px;
@@ -1167,13 +1059,6 @@ button:focus-visible {
 .upload-summary-badge-restored {
   background: var(--restore-soft);
   color: var(--restore);
-}
-.upload-summary-road-name {
-  color: var(--text-secondary);
-  font-size: 0.76rem;
-  margin-top: 1px;
-  white-space: normal;
-  overflow-wrap: break-word;
 }
 /* Feedback cards (upload results) */
 .feedback-card {
@@ -1232,19 +1117,6 @@ button:focus-visible {
   font-family: 'SF Mono', 'Cascadia Code', Consolas, monospace;
   font-weight: 600;
   color: var(--text-primary);
-}
-.rejected-detail {
-  margin-top: 8px;
-  font-size: 0.75rem;
-}
-.rejected-detail summary {
-  cursor: pointer;
-  color: var(--text-secondary);
-}
-.rejected-detail ul {
-  margin: 6px 0 0;
-  padding-left: 16px;
-  color: var(--text-secondary);
 }
 
 /* Inventory table */

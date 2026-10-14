@@ -78,6 +78,7 @@ class UploadResult(BaseModel):
     skipped: list[RoadSkippedOut] = []
     total_rows_processed: int
     ignored_columns: list[str]
+    log_id: int | None = None
 
 
 class RoadPreviewNew(BaseModel):

@@ -7,8 +7,6 @@ import UploadConflictModal from './UploadConflictModal'
 import UploadHistoryModal from './UploadHistoryModal'
 import RestoreBackupModal from './RestoreBackupModal'
 
-const AUTO_MINIMIZE_AFTER_UPLOAD_MS = 3000
-const AUTO_MINIMIZE_AFTER_VIEW_MS = 5000
 const REQUIRED_COLUMNS_AUTO_HIDE_MS = 10000
 
 const REQUIRED_COLUMNS = [
@@ -22,12 +20,54 @@ const REQUIRED_COLUMNS = [
   'Shoulder Surface type Right',
 ]
 
+// Builds the post-upload toast's variant + message from a commitUpload()
+// result. A single outcome bucket (e.g. everything just "added") reads as
+// the short "N roads uploaded"; a mix of added/replaced/up-to-date/kept
+// gets the itemized "Upload complete: ..." form instead.
+function buildUploadToast(res) {
+  const addedCount = res.imported.filter((r) => r.action === 'added').length
+  const replacedCount = res.imported.filter((r) => r.action === 'replaced').length
+  const upToDateCount = res.imported.filter((r) => r.action === 'up_to_date').length
+  const keptCount = res.skipped.length
+  const rejectedCount = res.rejected.length
+  const successCount = addedCount + replacedCount + upToDateCount + keptCount
+
+  if (successCount === 0 && rejectedCount > 0) {
+    return {
+      variant: 'danger',
+      message: `Upload failed: ${rejectedCount} road${rejectedCount !== 1 ? 's' : ''} rejected`,
+    }
+  }
+
+  const parts = []
+  if (addedCount > 0) parts.push(`${addedCount} added`)
+  if (replacedCount > 0) parts.push(`${replacedCount} replaced`)
+  if (upToDateCount > 0) parts.push(`${upToDateCount} up to date`)
+  if (keptCount > 0) parts.push(`${keptCount} kept`)
+
+  if (rejectedCount > 0) {
+    return {
+      variant: 'warning',
+      message: `${successCount} road${successCount !== 1 ? 's' : ''} uploaded · ${rejectedCount} rejected`,
+    }
+  }
+  if (parts.length <= 1) {
+    return {
+      variant: 'success',
+      message: `${successCount} road${successCount !== 1 ? 's' : ''} uploaded`,
+    }
+  }
+  return {
+    variant: 'success',
+    message: `Upload complete: ${parts.join(', ')}`,
+  }
+}
+
 const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, roads, uploadMeta, onExpand }, ref) {
   const fileInputRef = useRef(null)
   const restoreInputRef = useRef(null)
   const [fileName, setFileName] = useState('')
   const [uploading, setUploading] = useState(false)
-  const [result, setResult] = useState(null)
   const [error, setError] = useState('')
   const [backingUp, setBackingUp] = useState(false)
   const [pendingRestore, setPendingRestore] = useState(null)
@@ -36,18 +76,15 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
   // response + file name until the user resolves the modal (or cancels).
   // Nothing is written to the backend while this is non-null.
   const [pendingConflict, setPendingConflict] = useState(null)
-  // Starts collapsed: a fresh in-session upload explicitly expands itself
-  // (see the `result`-keyed effect below), but data restored from a page
-  // reload must NOT auto-expand or start the auto-minimize timer.
-  const [resultExpanded, setResultExpanded] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  // Set when a toast's "View details" link opens History -- auto-expands
+  // that upload's log entry instead of landing on a flat list.
+  const [historyInitialExpandedId, setHistoryInitialExpandedId] = useState(null)
   const [hasUnreadLog, setHasUnreadLog] = useState(false)
   // Intentionally not persisted -- always starts collapsed on page load,
   // even if the user had it open before refreshing.
   const [requiredColumnsOpen, setRequiredColumnsOpen] = useState(false)
 
-  const timerRef = useRef(null)
-  const durationRef = useRef(AUTO_MINIMIZE_AFTER_UPLOAD_MS)
   const historyBtnRef = useRef(null)
   const requiredColumnsTimerRef = useRef(null)
 
@@ -189,64 +226,26 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
     }
   }
 
-  function clearAutoMinimizeTimer() {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current)
-      timerRef.current = null
-    }
-  }
-
-  function startAutoMinimizeTimer(duration) {
-    clearAutoMinimizeTimer() // never stack two timers
-    durationRef.current = duration
-    timerRef.current = setTimeout(() => setResultExpanded(false), duration)
-  }
-
-  useEffect(() => {
-    if (!result) return
-    setResultExpanded(true)
-    startAutoMinimizeTimer(AUTO_MINIMIZE_AFTER_UPLOAD_MS)
-    return clearAutoMinimizeTimer
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result])
-
-  useEffect(() => clearAutoMinimizeTimer, [])
-
-  // Deleting every road resets the whole upload state -- fileName, result,
-  // and the file input itself -- so the same file can be re-uploaded right
-  // away without a hard refresh.
+  // Deleting every road resets the whole upload state -- fileName and the
+  // file input itself -- so the same file can be re-uploaded right away
+  // without a hard refresh.
   useEffect(() => {
     if (roads && roads.length === 0) {
       setFileName('')
-      setResult(null)
       setError('')
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }, [roads])
 
-  function handleViewDetails() {
-    setResultExpanded(true)
-    startAutoMinimizeTimer(AUTO_MINIMIZE_AFTER_VIEW_MS)
-  }
-
-  function handleMinimize() {
-    clearAutoMinimizeTimer()
-    setResultExpanded(false)
-  }
-
-  function handlePause() {
-    clearAutoMinimizeTimer()
-  }
-
-  function handleResume() {
-    if (resultExpanded) startAutoMinimizeTimer(durationRef.current)
+  function openHistory(expandedId = null) {
+    setHistoryInitialExpandedId(expandedId)
+    setHistoryOpen(true)
   }
 
   async function handleFileChange(e) {
     const file = e.target.files?.[0]
     if (!file) return
     setError('')
-    setResult(null)
     setUploading(true)
     try {
       // Parses and validates only -- nothing is saved yet. Road IDs that
@@ -277,16 +276,16 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
     try {
       const res = await commitUpload(token, decisions)
       setFileName(uploadedFileName)
-      setResult(res)
       onUploaded(res, uploadedFileName)
       requestPersistentStorageOnce()
-      const addedCount = res.imported.filter((r) => r.action === 'added').length
-      const replacedCount = res.imported.filter((r) => r.action === 'replaced').length
-      const skippedCount = res.skipped.length
-      const parts = [`${addedCount} added`]
-      if (replacedCount > 0) parts.push(`${replacedCount} replaced`)
-      if (skippedCount > 0) parts.push(`${skippedCount} skipped`)
-      showToast({ variant: 'success', message: `Upload complete: ${parts.join(', ')}` })
+      const { variant, message } = buildUploadToast(res)
+      showToast({
+        variant,
+        message,
+        duration: variant === 'success' ? 4000 : 8000,
+        actionLabel: res.log_id != null ? 'View details' : undefined,
+        onAction: res.log_id != null ? () => openHistory(res.log_id) : undefined,
+      })
       checkUnreadLog()
     } catch (err) {
       setError(err.message)
@@ -309,49 +308,6 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
 
   function handleConflictContinue(decisions) {
     finishUpload(pendingConflict.preview.token, decisions, pendingConflict.fileName)
-  }
-
-  // Imported/rejected source: a live in-session upload response has full
-  // detail (segment counts, row-level errors). After a reload there's no
-  // response to read anymore -- only the lightweight uploadMeta persisted
-  // alongside it (fileName/uploadedAt/rejected) -- so the imported list is
-  // rebuilt straight from the live `roads` data (segment_count isn't known
-  // in that case and is simply omitted from the row).
-  const importedSource = result
-    ? result.imported
-    : uploadMeta
-    ? roads.map((r) => ({ road_id: r.road_id, road_name: r.road_name, segment_count: null }))
-    : []
-  const rejectedSource = result ? result.rejected : uploadMeta?.rejected || []
-  const skippedSource = result?.skipped || []
-
-  // Derived from the LIVE roads list, not a stored snapshot -- a road
-  // deleted after upload disappears from here immediately, no refresh
-  // needed. Rejected roads were never imported, so they're unaffected by
-  // deletions and are shown exactly as the upload reported them.
-  const visibleImported = importedSource.filter((r) => roads?.some((x) => x.road_id === r.road_id))
-  const importedCount = visibleImported.length
-  const rejectedCount = rejectedSource.length
-  const skippedCount = skippedSource.length
-  const hasAnyResultData = importedCount > 0 || rejectedCount > 0 || skippedCount > 0
-
-  // The card can disappear without the user clicking Minimize (e.g. every
-  // road from this upload got deleted) -- make sure no timer keeps running
-  // in the background pointing at a card that's no longer rendered.
-  useEffect(() => {
-    if (!hasAnyResultData) clearAutoMinimizeTimer()
-  }, [hasAnyResultData])
-
-  const headerIsError = importedCount === 0 && rejectedCount > 0
-  let headerText = ''
-  if (importedCount > 0 && rejectedCount > 0) {
-    headerText = `${importedCount} road${importedCount !== 1 ? 's' : ''} uploaded · ${rejectedCount} rejected`
-  } else if (importedCount > 0) {
-    headerText = `${importedCount} road${importedCount !== 1 ? 's' : ''} uploaded`
-  } else if (rejectedCount > 0) {
-    headerText = `${rejectedCount} road${rejectedCount !== 1 ? 's' : ''} rejected`
-  } else if (skippedCount > 0) {
-    headerText = `${skippedCount} road${skippedCount !== 1 ? 's' : ''} skipped`
   }
 
   return (
@@ -402,22 +358,20 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
         ) : (
           <p className="file-name">No file selected</p>
         )}
-        {!hasAnyResultData && (
-          <button
-            type="button"
-            ref={historyBtnRef}
-            className="history-icon-btn"
-            title="Upload history"
-            aria-label="Upload history"
-            onClick={() => setHistoryOpen(true)}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M12 8v4l3 2M4.6 9A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M4 5v4h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            {hasUnreadLog && <span className="history-icon-dot" aria-hidden="true" />}
-          </button>
-        )}
+        <button
+          type="button"
+          ref={historyBtnRef}
+          className="history-icon-btn"
+          title="Upload history"
+          aria-label="Upload history"
+          onClick={() => openHistory()}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 8v4l3 2M4.6 9A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M4 5v4h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          {hasUnreadLog && <span className="history-icon-dot" aria-hidden="true" />}
+        </button>
       </div>
 
       <div className="backup-actions">
@@ -449,117 +403,6 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
             <strong>Upload failed</strong>
             <p>{error}</p>
           </div>
-        </div>
-      )}
-
-      {hasAnyResultData && (
-        <div
-          className="upload-summary-card"
-          onMouseEnter={handlePause}
-          onMouseLeave={handleResume}
-          onFocus={handlePause}
-          onBlur={handleResume}
-        >
-          <div className="upload-summary-header">
-            <div className="upload-summary-header-left">
-              <span
-                className={`upload-summary-icon ${headerIsError ? 'upload-summary-icon-critical' : 'upload-summary-icon-good'}`}
-                aria-hidden="true"
-              >
-                {headerIsError ? '✕' : '✓'}
-              </span>
-              <span className="upload-summary-title">{headerText}</span>
-            </div>
-            <button
-              type="button"
-              className="upload-summary-toggle"
-              onClick={resultExpanded ? handleMinimize : handleViewDetails}
-            >
-              {resultExpanded ? 'Minimize ▴' : 'View details ▾'}
-            </button>
-            <button
-              type="button"
-              ref={historyBtnRef}
-              className="history-icon-btn"
-              title="Upload history"
-              aria-label="Upload history"
-              onClick={() => setHistoryOpen(true)}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M12 8v4l3 2M4.6 9A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M4 5v4h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              {hasUnreadLog && <span className="history-icon-dot" aria-hidden="true" />}
-            </button>
-          </div>
-
-          <div className={`upload-summary-body${resultExpanded ? ' upload-summary-body-open' : ''}`}>
-            <div className="upload-summary-body-inner thin-scroll">
-              {importedCount > 0 && (
-                <ul className="upload-summary-list">
-                  {visibleImported.map((r) => (
-                    <li key={r.road_id} className="upload-summary-row">
-                      <div className="upload-summary-row-top">
-                        <span className="mono">{r.road_id}</span>
-                        <span className="upload-summary-row-right">
-                          {r.action && (
-                            <span className={`upload-summary-badge upload-summary-badge-${r.action}`}>
-                              {r.action === 'replaced' ? 'Replaced' : r.action === 'up_to_date' ? 'Up to date' : 'Added'}
-                            </span>
-                          )}
-                          {r.segment_count != null && (
-                            <span className="upload-summary-count">
-                              {r.segment_count} segment{r.segment_count !== 1 ? 's' : ''}
-                            </span>
-                          )}
-                        </span>
-                      </div>
-                      <div className="upload-summary-road-name">{r.road_name}</div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              {skippedCount > 0 && (
-                <ul className="upload-summary-list" style={importedCount > 0 ? { marginTop: 12 } : undefined}>
-                  {skippedSource.map((r) => (
-                    <li key={r.road_id} className="upload-summary-row">
-                      <div className="upload-summary-row-top">
-                        <span className="mono">{r.road_id}</span>
-                        <span className="upload-summary-badge upload-summary-badge-skipped">Skipped</span>
-                      </div>
-                      <div className="upload-summary-road-name">{r.road_name} &middot; kept existing data</div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              {rejectedCount > 0 && (
-                <div
-                  className="feedback-card feedback-critical"
-                  style={importedCount > 0 || skippedCount > 0 ? { marginTop: 12 } : undefined}
-                >
-                  <span className="feedback-icon" aria-hidden="true">✕</span>
-                  <div className="feedback-body">
-                    <strong>{rejectedCount} road{rejectedCount !== 1 ? 's' : ''} rejected — not uploaded</strong>
-                    {rejectedSource.map((r) => (
-                      <details key={r.road_id} className="rejected-detail">
-                        <summary>
-                          <span className="mono">{r.road_id}</span> — {r.errors.length} error{r.errors.length !== 1 ? 's' : ''}
-                        </summary>
-                        <ul>
-                          {r.errors.map((e, i) => (
-                            <li key={i}>Row {e.row} ({e.field}): {e.message}</li>
-                          ))}
-                        </ul>
-                      </details>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
         </div>
       )}
 
@@ -618,8 +461,10 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
           onClose={() => {
             setHistoryOpen(false)
             setHasUnreadLog(false)
+            setHistoryInitialExpandedId(null)
           }}
           triggerRef={historyBtnRef}
+          initialExpandedId={historyInitialExpandedId}
         />
       )}
 

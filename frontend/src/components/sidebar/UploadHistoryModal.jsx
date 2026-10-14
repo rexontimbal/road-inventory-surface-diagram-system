@@ -163,7 +163,7 @@ function wouldHaveSentence(entry) {
   return parts.length > 0 ? `${parts.join(', ')}.` : null
 }
 
-export default function UploadHistoryModal({ onClose, triggerRef }) {
+export default function UploadHistoryModal({ onClose, triggerRef, initialExpandedId }) {
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [action, setAction] = useState('all')
@@ -172,7 +172,7 @@ export default function UploadHistoryModal({ onClose, triggerRef }) {
   const [pageSize, setPageSize] = useState(10)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [expandedIds, setExpandedIds] = useState(() => new Set())
+  const [expandedIds, setExpandedIds] = useState(() => (initialExpandedId != null ? new Set([initialExpandedId]) : new Set()))
 
   const cardRef = useRef(null)
   const firstFocusableRef = useRef(null)

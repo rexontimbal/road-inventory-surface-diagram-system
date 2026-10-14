@@ -303,7 +303,7 @@ def upload_commit(body: UploadCommitIn, db: Session = Depends(get_db)):
             }
         )
 
-    write_log_entry(
+    log_entry = write_log_entry(
         db,
         kind="upload",
         status="completed",
@@ -321,6 +321,7 @@ def upload_commit(body: UploadCommitIn, db: Session = Depends(get_db)):
         skipped=skipped,
         total_rows_processed=result.total_rows_processed,
         ignored_columns=result.ignored_columns,
+        log_id=log_entry.id,
     )
 
 

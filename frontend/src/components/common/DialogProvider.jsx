@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Modal from './Modal'
 import { getFullscreenPortalRoot } from '../../utils/fullscreenPortal'
@@ -42,6 +42,9 @@ export default function DialogProvider({ children }) {
   const [confirmState, setConfirmState] = useState(null)
   const [alertState, setAlertState] = useState(null)
   const [toasts, setToasts] = useState([])
+  // Per-toast countdown state, keyed by toast id -- lets hover pause/resume
+  // the auto-dismiss timer without re-rendering the toast list on every tick.
+  const toastTimers = useRef(new Map())
   // Re-renders on every fullscreen enter/exit so the toast portal below
   // (which otherwise might not re-render around that exact moment) always
   // targets the current getFullscreenPortalRoot() -- a toast fired while
@@ -67,9 +70,7 @@ export default function DialogProvider({ children }) {
       const id = `${Date.now()}-${Math.random()}`
       const duration = opts.duration ?? 3000
       setToasts((t) => [...t, { id, variant: 'info', ...opts }])
-      setTimeout(() => {
-        setToasts((t) => t.filter((x) => x.id !== id))
-      }, duration)
+      scheduleToastDismiss(id, duration)
     }
     return () => {
       _confirmHandler = null
@@ -89,7 +90,39 @@ export default function DialogProvider({ children }) {
   }
 
   function dismissToast(id) {
+    const timer = toastTimers.current.get(id)
+    if (timer) {
+      clearTimeout(timer.timeoutId)
+      toastTimers.current.delete(id)
+    }
     setToasts((t) => t.filter((x) => x.id !== id))
+  }
+
+  function scheduleToastDismiss(id, duration) {
+    const timeoutId = setTimeout(() => {
+      toastTimers.current.delete(id)
+      setToasts((t) => t.filter((x) => x.id !== id))
+    }, duration)
+    toastTimers.current.set(id, { timeoutId, remaining: duration, startedAt: Date.now() })
+  }
+
+  function pauseToast(id) {
+    const timer = toastTimers.current.get(id)
+    if (!timer) return
+    clearTimeout(timer.timeoutId)
+    timer.remaining -= Date.now() - timer.startedAt
+    timer.timeoutId = null
+  }
+
+  function resumeToast(id) {
+    const timer = toastTimers.current.get(id)
+    if (!timer || timer.timeoutId) return
+    const remaining = Math.max(timer.remaining, 0)
+    timer.timeoutId = setTimeout(() => {
+      toastTimers.current.delete(id)
+      setToasts((t) => t.filter((x) => x.id !== id))
+    }, remaining)
+    timer.startedAt = Date.now()
   }
 
   return (
@@ -123,7 +156,13 @@ export default function DialogProvider({ children }) {
       {createPortal(
         <div className="toast-stack no-print">
           {toasts.map((t) => (
-            <div key={t.id} className={`toast toast-${t.variant}`} role="status">
+            <div
+              key={t.id}
+              className={`toast toast-${t.variant}`}
+              role="status"
+              onMouseEnter={() => pauseToast(t.id)}
+              onMouseLeave={() => resumeToast(t.id)}
+            >
               <span className="toast-icon" aria-hidden="true">
                 {TOAST_ICONS[t.variant] || TOAST_ICONS.info}
               </span>
