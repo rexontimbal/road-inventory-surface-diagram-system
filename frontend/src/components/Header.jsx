@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { showAlert } from './common/DialogProvider'
-import GoogleSignInButton from './auth/GoogleSignInButton'
+import SignInModal from './auth/SignInModal'
+import UserMenu from './auth/UserMenu'
 
 // Two thresholds (not one) so a scroll position that lands between them can't
 // flip the header back and forth -- it only switches state when scrollY
@@ -79,8 +80,10 @@ export default function Header({
   authChecked,
   onGoogleCredential,
   onSignOut,
+  onOpenHistory,
 }) {
   const [shrunk, setShrunk] = useState(false)
+  const [signInOpen, setSignInOpen] = useState(false)
   const shrunkRef = useRef(false)
   const tickingRef = useRef(false)
 
@@ -186,24 +189,43 @@ export default function Header({
           >
             ?
           </button>
-          {/* Part 2 placeholder -- Part 3 replaces this with the designed
-              Sign in button / avatar + dropdown. Functionally complete
-              (real sign-in, real sign-out) but intentionally unstyled. */}
-          {authChecked &&
-            (authUser ? (
-              <div className="header-auth-placeholder">
-                <span className="header-auth-placeholder-name">{authUser.name}</span>
-                <button type="button" className="header-auth-placeholder-signout" onClick={onSignOut}>
-                  Sign out
-                </button>
-              </div>
-            ) : (
-              <GoogleSignInButton onCredential={onGoogleCredential} />
-            ))}
+          {!authChecked ? (
+            <span className="header-auth-skeleton" aria-hidden="true" />
+          ) : authUser ? (
+            <UserMenu user={authUser} onSignOut={onSignOut} onOpenHistory={onOpenHistory} />
+          ) : (
+            <button type="button" className="header-signin-btn" onClick={() => setSignInOpen(true)}>
+              <svg className="header-signin-btn-icon" width="16" height="16" viewBox="0 0 48 48" aria-hidden="true">
+                <path
+                  fill="#FFC107"
+                  d="M43.6 20.5H42V20H24v8h11.3C33.8 32.9 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.1 8.1 3l5.7-5.7C34.5 6.1 29.5 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20c11 0 19.6-8 19.6-20 0-1.3-.1-2.7-.4-3.5z"
+                />
+                <path
+                  fill="#FF3D00"
+                  d="M6.3 14.7l6.6 4.8C14.5 15.1 18.9 12 24 12c3.1 0 5.9 1.1 8.1 3l5.7-5.7C34.5 6.1 29.5 4 24 4 16.3 4 9.6 8.3 6.3 14.7z"
+                />
+                <path
+                  fill="#4CAF50"
+                  d="M24 44c5.2 0 9.9-1.8 13.6-4.9l-6.3-5.2C29.2 35.6 26.7 36 24 36c-5.3 0-9.7-3.1-11.3-7.5l-6.5 5C9.4 39.6 16.1 44 24 44z"
+                />
+                <path
+                  fill="#1976D2"
+                  d="M43.6 20.5H42V20H24v8h11.3c-1 2.7-2.9 5-5.3 6.4l6.3 5.2C39.6 36.7 44 30.9 44 24c0-1.3-.1-2.7-.4-3.5z"
+                />
+              </svg>
+              Sign in
+            </button>
+          )}
         </div>
       </div>
     </header>
     <div className="app-header-spacer no-print" aria-hidden="true" />
+    {signInOpen && (
+      <SignInModal
+        onClose={() => setSignInOpen(false)}
+        onCredential={onGoogleCredential}
+      />
+    )}
     </>
   )
 }

@@ -346,14 +346,16 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
       />
       <div className="file-name-row">
         {fileName ? (
-          <p className="file-name">{fileName}</p>
+          <p className="file-name" title={fileName}>
+            {fileName}
+          </p>
         ) : uploadMeta ? (
-          <p className="file-name file-name-restored">
+          <p className="file-name file-name-restored" title={`Last file: ${uploadMeta.fileName}`}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
               <path d="M14 3v5h5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            Last file: {uploadMeta.fileName}
+            <span className="file-name-text">Last file: {uploadMeta.fileName}</span>
           </p>
         ) : (
           <p className="file-name">No file selected</p>

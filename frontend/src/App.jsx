@@ -51,11 +51,8 @@ export default function App() {
   // backend DB; this is just the descriptive file name/timestamp).
   const [uploadMeta, setUploadMeta] = useState(readUploadMeta)
   const [networkSummaryOpen, setNetworkSummaryOpen] = useState(readStoredNetworkSummaryOpen)
-  // Part 2 scope: plumbing only (who's signed in, sign-in/out actions).
   // authChecked gates the header's auth UI so it doesn't flash "signed out"
-  // before the /api/auth/me check resolves. The actual header UI (avatar,
-  // dropdown, sign-in modal) is Part 3 -- Header currently renders a plain
-  // placeholder off of these same props.
+  // before the /api/auth/me check resolves.
   const [authUser, setAuthUser] = useState(null)
   const [authChecked, setAuthChecked] = useState(false)
   const uploadPanelRef = useRef(null)
@@ -68,14 +65,19 @@ export default function App() {
       .finally(() => setAuthChecked(true))
   }, [])
 
+  // Deliberately rethrows on failure instead of catching -- SignInModal is
+  // the caller for this (its Google button lives inside the modal), and it
+  // needs the rejection itself to show its own inline "account not allowed"
+  // message rather than a toast the user might not even see behind the
+  // still-open modal.
   async function handleGoogleCredential(idToken) {
-    try {
-      const res = await signInWithGoogle(idToken)
-      setAuthUser(res.user)
-      showToast({ variant: 'success', message: `Signed in as ${res.user.name}` })
-    } catch (err) {
-      showToast({ variant: 'danger', message: `Sign-in failed: ${err.message}` })
-    }
+    const res = await signInWithGoogle(idToken)
+    setAuthUser(res.user)
+    showToast({ variant: 'success', message: `Signed in as ${res.user.name}` })
+  }
+
+  function handleOpenHistoryFromHeader() {
+    uploadPanelRef.current?.openHistory()
   }
 
   async function handleSignOut() {
@@ -369,6 +371,7 @@ export default function App() {
         authChecked={authChecked}
         onGoogleCredential={handleGoogleCredential}
         onSignOut={handleSignOut}
+        onOpenHistory={handleOpenHistoryFromHeader}
       />
       <div className="main-layout">
         <aside className={`sidebar${sidebarCollapsed ? ' collapsed' : ''}`}>
