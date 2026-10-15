@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse
 
 from app.db import Base, engine, ensure_schema
-from app.routers import backup, roads
+from app.routers import auth, backup, roads
 
 Base.metadata.create_all(bind=engine)
 ensure_schema()
@@ -15,7 +15,12 @@ app = FastAPI(title="Road Inventory & Surface Diagram System")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    # Only matters for local dev, where the Vite dev server (5173) and the
+    # backend (8000) are different origins -- in production the built
+    # frontend is served by this same app (see FRONTEND_DIST below), so
+    # there's no cross-origin request to allow. allow_credentials requires
+    # an explicit origin list (no "*"), since auth now relies on cookies.
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -23,6 +28,7 @@ app.add_middleware(
 
 app.include_router(roads.router)
 app.include_router(backup.router)
+app.include_router(auth.router)
 
 
 @app.get("/api/health")

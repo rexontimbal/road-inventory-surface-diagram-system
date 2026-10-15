@@ -3,6 +3,22 @@ from typing import Literal
 from pydantic import BaseModel
 
 
+class GoogleAuthIn(BaseModel):
+    id_token: str
+
+
+class UserOut(BaseModel):
+    id: int
+    name: str
+    email: str
+    avatar_url: str | None = None
+
+
+class MeOut(BaseModel):
+    authenticated: bool
+    user: UserOut | None = None
+
+
 class RoadSummary(BaseModel):
     road_id: str
     road_name: str

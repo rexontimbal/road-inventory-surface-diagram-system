@@ -224,6 +224,43 @@
   background: rgba(255, 255, 255, 0.16);
 }
 
+/* Part 2 placeholder only -- functional, not the designed Part 3 UI
+   (Sign in button / avatar + dropdown). Kept intentionally plain. */
+.header-auth-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.header-auth-placeholder-name {
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.header-auth-placeholder-signout {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 12px;
+}
+.header-auth-placeholder-signout:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+.header-auth-unconfigured {
+  flex-shrink: 0;
+  color: #94a3b8;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.google-signin-btn-slot {
+  flex-shrink: 0;
+}
+
 .how-to-use-list {
   margin: 0;
   padding: 0;

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { showAlert } from './common/DialogProvider'
+import GoogleSignInButton from './auth/GoogleSignInButton'
 
 // Two thresholds (not one) so a scroll position that lands between them can't
 // flip the header back and forth -- it only switches state when scrollY
@@ -69,7 +70,16 @@ export function openHowToUse() {
   })
 }
 
-export default function Header({ summary, lastUploadAt, networkSummaryOpen, onToggleNetworkSummary }) {
+export default function Header({
+  summary,
+  lastUploadAt,
+  networkSummaryOpen,
+  onToggleNetworkSummary,
+  authUser,
+  authChecked,
+  onGoogleCredential,
+  onSignOut,
+}) {
   const [shrunk, setShrunk] = useState(false)
   const shrunkRef = useRef(false)
   const tickingRef = useRef(false)
@@ -176,6 +186,20 @@ export default function Header({ summary, lastUploadAt, networkSummaryOpen, onTo
           >
             ?
           </button>
+          {/* Part 2 placeholder -- Part 3 replaces this with the designed
+              Sign in button / avatar + dropdown. Functionally complete
+              (real sign-in, real sign-out) but intentionally unstyled. */}
+          {authChecked &&
+            (authUser ? (
+              <div className="header-auth-placeholder">
+                <span className="header-auth-placeholder-name">{authUser.name}</span>
+                <button type="button" className="header-auth-placeholder-signout" onClick={onSignOut}>
+                  Sign out
+                </button>
+              </div>
+            ) : (
+              <GoogleSignInButton onCredential={onGoogleCredential} />
+            ))}
         </div>
       </div>
     </header>

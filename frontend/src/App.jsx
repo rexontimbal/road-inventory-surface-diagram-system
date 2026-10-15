@@ -15,6 +15,7 @@ import {
 } from './api/roads'
 import { formatStation, parseStationInput } from './utils/chainage'
 import { readUploadMeta, writeUploadMeta } from './utils/uploadMeta'
+import { fetchMe, signInWithGoogle, signOut } from './api/auth'
 import { showToast } from './components/common/DialogProvider'
 import './App.css'
 
@@ -50,8 +51,42 @@ export default function App() {
   // backend DB; this is just the descriptive file name/timestamp).
   const [uploadMeta, setUploadMeta] = useState(readUploadMeta)
   const [networkSummaryOpen, setNetworkSummaryOpen] = useState(readStoredNetworkSummaryOpen)
+  // Part 2 scope: plumbing only (who's signed in, sign-in/out actions).
+  // authChecked gates the header's auth UI so it doesn't flash "signed out"
+  // before the /api/auth/me check resolves. The actual header UI (avatar,
+  // dropdown, sign-in modal) is Part 3 -- Header currently renders a plain
+  // placeholder off of these same props.
+  const [authUser, setAuthUser] = useState(null)
+  const [authChecked, setAuthChecked] = useState(false)
   const uploadPanelRef = useRef(null)
   const diagramPanelRef = useRef(null)
+
+  useEffect(() => {
+    fetchMe()
+      .then((res) => setAuthUser(res.user))
+      .catch(() => setAuthUser(null))
+      .finally(() => setAuthChecked(true))
+  }, [])
+
+  async function handleGoogleCredential(idToken) {
+    try {
+      const res = await signInWithGoogle(idToken)
+      setAuthUser(res.user)
+      showToast({ variant: 'success', message: `Signed in as ${res.user.name}` })
+    } catch (err) {
+      showToast({ variant: 'danger', message: `Sign-in failed: ${err.message}` })
+    }
+  }
+
+  async function handleSignOut() {
+    try {
+      await signOut()
+      setAuthUser(null)
+      showToast({ variant: 'info', message: 'Signed out' })
+    } catch (err) {
+      showToast({ variant: 'danger', message: `Sign-out failed: ${err.message}` })
+    }
+  }
 
   async function refreshRoads() {
     const list = await fetchRoadsList()
@@ -330,6 +365,10 @@ export default function App() {
         lastUploadAt={uploadMeta ? new Date(uploadMeta.uploadedAt) : null}
         networkSummaryOpen={networkSummaryOpen}
         onToggleNetworkSummary={toggleNetworkSummary}
+        authUser={authUser}
+        authChecked={authChecked}
+        onGoogleCredential={handleGoogleCredential}
+        onSignOut={handleSignOut}
       />
       <div className="main-layout">
         <aside className={`sidebar${sidebarCollapsed ? ' collapsed' : ''}`}>
