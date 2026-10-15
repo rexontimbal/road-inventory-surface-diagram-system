@@ -90,3 +90,31 @@ class UploadLogEntry(Base):
     # rather than a child table -- it's always read/written as a whole with
     # its parent entry, never queried independently.
     details_json = Column(Text, nullable=False, default="[]")
+
+
+class User(Base):
+    """A signed-in Google account. Schema only for now -- nothing writes or
+    reads this table until the auth endpoints (Part 2) exist."""
+
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    google_id = Column(String, nullable=False, unique=True)
+    email = Column(String, nullable=False)
+    name = Column(String, nullable=False)
+    avatar_url = Column(String, nullable=True)
+    created_at = Column(String, nullable=False)
+    last_login_at = Column(String, nullable=False)
+
+
+class GuestSession(Base):
+    """One row per guest cookie. Tracks last_activity_at so a cleanup pass
+    (Part 4) can find and delete guests idle past GUEST_DATA_TTL_MINUTES,
+    along with whatever roads/segments/log entries they own -- schema only
+    for now, nothing writes or reads this table until guest mode exists."""
+
+    __tablename__ = "guest_sessions"
+
+    guest_id = Column(String, primary_key=True)
+    created_at = Column(String, nullable=False)
+    last_activity_at = Column(String, nullable=False)

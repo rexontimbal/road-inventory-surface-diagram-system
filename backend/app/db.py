@@ -1,17 +1,45 @@
+import os
 from pathlib import Path
 
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-DATA_DIR.mkdir(exist_ok=True)
-DATABASE_URL = f"sqlite:///{DATA_DIR / 'road_inventory.db'}"
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BACKEND_DIR / ".env")
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+DATA_DIR = BACKEND_DIR / "data"
+DATA_DIR.mkdir(exist_ok=True)
+
+
+def _normalize_database_url(url: str) -> str:
+    """Neon/Supabase/Render hand out a plain `postgres://` or `postgresql://`
+    URL -- normalize it to the psycopg3 dialect SQLAlchemy needs asked for
+    explicitly (`postgresql+psycopg://`), so DATABASE_URL can be pasted
+    as-is from any of those dashboards without edits."""
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://") :]
+    if url.startswith("postgresql://") and "+psycopg" not in url:
+        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return url
+
+
+_env_url = os.environ.get("DATABASE_URL")
+if _env_url:
+    DATABASE_URL = _normalize_database_url(_env_url)
+    IS_SQLITE = False
+else:
+    # Local dev default -- unchanged from before DATABASE_URL existed.
+    DATABASE_URL = f"sqlite:///{DATA_DIR / 'road_inventory.db'}"
+    IS_SQLITE = True
+
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if IS_SQLITE else {})
 
 
 @event.listens_for(engine, "connect")
 def _set_sqlite_pragma(dbapi_connection, connection_record):
+    if not IS_SQLITE:
+        return
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.execute("PRAGMA journal_mode=WAL")
@@ -27,7 +55,14 @@ def ensure_schema():
     COLUMNS on a table that already exists -- so a column added to a model
     after the live DB file was first created needs an explicit, additive
     ALTER TABLE here. Safe to call on every startup: each column is only
-    added if it isn't already present."""
+    added if it isn't already present.
+
+    SQLite-only: these patches exist because the local dev DB file has been
+    through several schema revisions over time. A Postgres DATABASE_URL
+    always starts from Base.metadata.create_all's fresh, fully-current
+    schema, so none of this historical backfill is needed there."""
+    if not IS_SQLITE:
+        return
     with engine.connect() as conn:
         existing_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(roads)").fetchall()}
         if "source_file" not in existing_cols:

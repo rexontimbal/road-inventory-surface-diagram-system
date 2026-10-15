@@ -8,6 +8,12 @@ backend/data/*.db-journal
 backend/data/*.db-wal
 backend/data/*.db-shm
 backend/.pytest_cache/
+backend/.env
+
+# Env files (secrets) -- .env.example files are tracked on purpose
+.env
+frontend/.env
+frontend/.env.local
 
 # Frontend
 frontend/node_modules/
