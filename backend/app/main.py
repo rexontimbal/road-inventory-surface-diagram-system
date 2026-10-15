@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse
 
 from app import config  # noqa: F401 -- loads backend/.env before the os.environ reads below (this app, db, auth)
-from app.db import Base, SessionLocal, engine, ensure_schema
+from app.db import IS_SQLITE, Base, SessionLocal, engine, ensure_schema
 from app.routers import auth, backup, guest, roads
 from app.scope import GUEST_CLEANUP_INTERVAL_MINUTES, cleanup_expired_guests
 
@@ -78,7 +78,14 @@ app.include_router(guest.router)
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "auth_configured": GOOGLE_CLIENT_ID_CONFIGURED}
+    return {
+        "status": "ok",
+        "auth_configured": GOOGLE_CLIENT_ID_CONFIGURED,
+        # Lets a deploy be confirmed as actually using the configured
+        # DATABASE_URL (Postgres) rather than silently falling back to the
+        # local SQLite file -- no secret in this, just which engine.
+        "database": "sqlite" if IS_SQLITE else "postgres",
+    }
 
 
 # Serve the built React app (frontend/dist) when present, so the whole
