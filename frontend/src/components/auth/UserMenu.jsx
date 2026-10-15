@@ -1,4 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { getFullscreenPortalRoot } from '../../utils/fullscreenPortal'
+
+const PANEL_WIDTH = 220
+const GAP = 8
 
 function initials(name) {
   const parts = name.trim().split(/\s+/).filter(Boolean)
@@ -9,33 +14,70 @@ function initials(name) {
 
 export default function UserMenu({ user, onSignOut, onOpenHistory }) {
   const [open, setOpen] = useState(false)
+  const [ready, setReady] = useState(false)
   const [avatarFailed, setAvatarFailed] = useState(false)
-  const wrapRef = useRef(null)
+  const [placement, setPlacement] = useState(null) // { top, left }
+  const triggerRef = useRef(null)
+  const panelRef = useRef(null)
+
+  function close() {
+    setOpen(false)
+    setReady(false)
+  }
+
+  // Portal-rendered (not a CSS-absolute child of the trigger) so the panel
+  // escapes .app-header's own overflow:hidden (used for its background
+  // pattern) instead of being clipped by it -- the same reason CustomSelect
+  // portals its own panel. Positioned from the trigger's live rect, right-
+  // edge aligned, flipping horizontally inward if it would overflow the
+  // viewport on a narrow screen.
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current) return
+    const rect = triggerRef.current.getBoundingClientRect()
+    const left = Math.min(Math.max(8, rect.right - PANEL_WIDTH), window.innerWidth - PANEL_WIDTH - 8)
+    setPlacement({ top: rect.bottom + GAP, left })
+    setReady(true)
+  }, [open])
 
   useEffect(() => {
     if (!open) return
-    function handleOutside(e) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false)
+    function handlePointerDown(e) {
+      if (triggerRef.current?.contains(e.target)) return
+      if (panelRef.current?.contains(e.target)) return
+      close()
     }
     function handleKeyDown(e) {
-      if (e.key === 'Escape') setOpen(false)
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        close()
+        triggerRef.current?.focus()
+      }
     }
-    document.addEventListener('mousedown', handleOutside)
+    // Any outer-page scroll invalidates the computed position (the panel is
+    // a short static list, never itself scrollable) -- just close it.
+    function handleScroll(e) {
+      if (panelRef.current?.contains(e.target)) return
+      close()
+    }
+    document.addEventListener('mousedown', handlePointerDown)
     document.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('scroll', handleScroll, true)
     return () => {
-      document.removeEventListener('mousedown', handleOutside)
+      document.removeEventListener('mousedown', handlePointerDown)
       document.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('scroll', handleScroll, true)
     }
   }, [open])
 
   const showImage = user.avatar_url && !avatarFailed
 
   return (
-    <div className="user-menu" ref={wrapRef}>
+    <div className="user-menu">
       <button
         type="button"
+        ref={triggerRef}
         className="user-menu-trigger"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => (open ? close() : setOpen(true))}
         aria-haspopup="true"
         aria-expanded={open}
         title={user.name}
@@ -56,38 +98,46 @@ export default function UserMenu({ user, onSignOut, onOpenHistory }) {
         <span className="user-menu-name">{user.name.split(' ')[0]}</span>
       </button>
 
-      {open && (
-        <div className="user-menu-panel" role="menu">
-          <div className="user-menu-identity">
-            <div className="user-menu-identity-name">{user.name}</div>
-            <div className="user-menu-identity-email">{user.email}</div>
-          </div>
-          <div className="user-menu-divider" />
-          <button
-            type="button"
-            className="user-menu-item"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false)
-              onOpenHistory()
-            }}
+      {open &&
+        placement &&
+        createPortal(
+          <div
+            ref={panelRef}
+            className={`user-menu-panel${ready ? ' user-menu-panel-ready' : ''}`}
+            style={{ top: placement.top, left: placement.left, width: PANEL_WIDTH }}
+            role="menu"
           >
-            Upload history
-          </button>
-          <div className="user-menu-divider" />
-          <button
-            type="button"
-            className="user-menu-item user-menu-item-danger"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false)
-              onSignOut()
-            }}
-          >
-            Sign out
-          </button>
-        </div>
-      )}
+            <div className="user-menu-identity">
+              <div className="user-menu-identity-name">{user.name}</div>
+              <div className="user-menu-identity-email">{user.email}</div>
+            </div>
+            <div className="user-menu-divider" />
+            <button
+              type="button"
+              className="user-menu-item"
+              role="menuitem"
+              onClick={() => {
+                close()
+                onOpenHistory()
+              }}
+            >
+              Upload history
+            </button>
+            <div className="user-menu-divider" />
+            <button
+              type="button"
+              className="user-menu-item user-menu-item-danger"
+              role="menuitem"
+              onClick={() => {
+                close()
+                onSignOut()
+              }}
+            >
+              Sign out
+            </button>
+          </div>,
+          getFullscreenPortalRoot()
+        )}
     </div>
   )
 }

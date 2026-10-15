@@ -307,12 +307,14 @@
   font-weight: 600;
   white-space: nowrap;
 }
+/* Portal-rendered (position: fixed, coordinates computed in JS from the
+   trigger's rect) so it escapes .app-header's own overflow:hidden instead
+   of being clipped by it. z-index sits above the header (40) and ordinary
+   page content, but below modals (1000+) and toasts (1100) -- a modal or
+   toast opened while this is up should never render underneath it. */
 .user-menu-panel {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 50;
-  min-width: 220px;
+  position: fixed;
+  z-index: 900;
   background: #ffffff;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -320,17 +322,13 @@
   padding: 6px;
   display: flex;
   flex-direction: column;
-  animation: user-menu-pop-in 150ms ease-out;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 150ms ease-out, transform 150ms ease-out;
 }
-@keyframes user-menu-pop-in {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+.user-menu-panel-ready {
+  opacity: 1;
+  transform: translateY(0);
 }
 .user-menu-identity {
   padding: 8px 10px 10px;
