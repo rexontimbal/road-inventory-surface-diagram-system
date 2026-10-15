@@ -183,6 +183,20 @@ class UploadLogOut(BaseModel):
     deleted_count: int
     edited_count: int
     details: list[LogRoadDetail]
+    # "Who did it" (Part 5). user_id/actor_* are None for BOTH a guest
+    # action and a pre-tracking workspace action -- is_guest_action is what
+    # the frontend uses to tell those two "None" cases apart (Guest vs
+    # Unknown) without re-deriving owner_type itself.
+    is_guest_action: bool
+    user_id: int | None = None
+    actor_name: str | None = None
+    actor_email: str | None = None
+    actor_avatar_url: str | None = None
+
+
+class LogUserOut(BaseModel):
+    user_id: int
+    name: str | None
 
 
 class SegmentEditIn(BaseModel):

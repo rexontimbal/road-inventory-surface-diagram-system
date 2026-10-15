@@ -53,12 +53,16 @@ def write_log_entry(
     details: list[dict] | None = None,
     owner_type: str = "workspace",
     owner_id: str = "",
+    user_id: int | None = None,
+    actor_name: str | None = None,
+    actor_email: str | None = None,
+    actor_avatar_url: str | None = None,
 ) -> UploadLogEntry:
     """Adds a log row to the session -- caller commits it as part of the
     same transaction as the data change it describes. owner_type/owner_id
     default to the shared workspace so every pre-existing call site (and
     any test that doesn't care about scoping) keeps working unchanged;
-    real callers pass **owner_kwargs(scope)."""
+    real callers pass **owner_kwargs(scope), **user_kwargs(scope)."""
     details = details or []
     counts = {
         "added": 0,
@@ -91,6 +95,10 @@ def write_log_entry(
         details_json=json.dumps(details),
         owner_type=owner_type,
         owner_id=owner_id,
+        user_id=user_id,
+        actor_name=actor_name,
+        actor_email=actor_email,
+        actor_avatar_url=actor_avatar_url,
     )
     db.add(entry)
     return entry
@@ -115,10 +123,17 @@ def entry_to_out(entry: UploadLogEntry) -> UploadLogOut:
         deleted_count=entry.deleted_count,
         edited_count=entry.edited_count,
         details=[LogRoadDetail(**d) for d in details],
+        is_guest_action=entry.owner_type == "guest",
+        user_id=entry.user_id,
+        actor_name=entry.actor_name,
+        actor_email=entry.actor_email,
+        actor_avatar_url=entry.actor_avatar_url,
     )
 
 
-def _matches_filters(entry: UploadLogEntry, search: str | None, action: str | None) -> bool:
+def _matches_filters(
+    entry: UploadLogEntry, search: str | None, action: str | None, by_user: str | None, current_user_id: int | None
+) -> bool:
     details = json.loads(entry.details_json or "[]")
     if action and action != "all":
         if entry.kind == "delete":
@@ -128,6 +143,12 @@ def _matches_filters(entry: UploadLogEntry, search: str | None, action: str | No
         else:
             entry_actions = {d["action"] for d in details}
         if action not in entry_actions:
+            return False
+    if by_user and by_user != "all":
+        if by_user == "me":
+            if current_user_id is None or entry.user_id != current_user_id:
+                return False
+        elif str(entry.user_id or "") != by_user:
             return False
     if search:
         s = search.strip().lower()
@@ -142,7 +163,7 @@ def _matches_filters(entry: UploadLogEntry, search: str | None, action: str | No
     return True
 
 
-def _filtered_entries(db, *, scope, search, action, date_range):
+def _filtered_entries(db, *, scope, search, action, date_range, by_user=None):
     query = apply_scope(db.query(UploadLogEntry), UploadLogEntry, scope).order_by(UploadLogEntry.timestamp.desc())
     days = _DATE_RANGE_DAYS.get(date_range) if date_range else None
     if days:
@@ -150,11 +171,11 @@ def _filtered_entries(db, *, scope, search, action, date_range):
         # timestamp is stored as ISO-8601 text; lexical comparison matches
         # chronological order for a fixed-width ISO format.
         query = query.filter(UploadLogEntry.timestamp >= cutoff.isoformat())
-    return [e for e in query.all() if _matches_filters(e, search, action)]
+    return [e for e in query.all() if _matches_filters(e, search, action, by_user, scope.user_id)]
 
 
-def query_log(db, *, scope, search=None, action=None, date_range=None, page=1, page_size=10) -> UploadLogPage:
-    filtered = _filtered_entries(db, scope=scope, search=search, action=action, date_range=date_range)
+def query_log(db, *, scope, search=None, action=None, date_range=None, by_user=None, page=1, page_size=10) -> UploadLogPage:
+    filtered = _filtered_entries(db, scope=scope, search=search, action=action, date_range=date_range, by_user=by_user)
     total_records = len(filtered)
     total_pages = max(1, (total_records + page_size - 1) // page_size)
     start = (page - 1) * page_size
@@ -168,8 +189,24 @@ def query_log(db, *, scope, search=None, action=None, date_range=None, page=1, p
     )
 
 
-def export_log_csv(db, *, scope, search=None, action=None, date_range=None) -> str:
-    filtered = _filtered_entries(db, scope=scope, search=search, action=action, date_range=date_range)
+def list_log_users(db, *, scope) -> list[dict]:
+    """Distinct {user_id, name} pairs that actually appear in this scope's
+    log, for the "BY" filter dropdown -- keeps the list short and relevant
+    instead of every account that's ever signed in."""
+    rows = (
+        apply_scope(db.query(UploadLogEntry.user_id, UploadLogEntry.actor_name), UploadLogEntry, scope)
+        .filter(UploadLogEntry.user_id.isnot(None))
+        .distinct()
+        .all()
+    )
+    seen = {}
+    for user_id, name in rows:
+        seen[user_id] = name
+    return [{"user_id": uid, "name": name} for uid, name in sorted(seen.items(), key=lambda kv: (kv[1] or "").lower())]
+
+
+def export_log_csv(db, *, scope, search=None, action=None, date_range=None, by_user=None) -> str:
+    filtered = _filtered_entries(db, scope=scope, search=search, action=action, date_range=date_range, by_user=by_user)
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)
@@ -179,6 +216,8 @@ def export_log_csv(db, *, scope, search=None, action=None, date_range=None) -> s
             "Kind",
             "Status",
             "File",
+            "By",
+            "By Email",
             "Road ID",
             "Road Name",
             "Action",
@@ -190,6 +229,7 @@ def export_log_csv(db, *, scope, search=None, action=None, date_range=None) -> s
     for entry in filtered:
         details = json.loads(entry.details_json or "[]")
         rows = details or [{}]
+        by_name = entry.actor_name or ("Guest" if entry.owner_type == "guest" else "Unknown")
         for d in rows:
             writer.writerow(
                 [
@@ -197,6 +237,8 @@ def export_log_csv(db, *, scope, search=None, action=None, date_range=None) -> s
                     entry.kind,
                     entry.status,
                     entry.file_name or "",
+                    by_name,
+                    entry.actor_email or "",
                     d.get("road_id", ""),
                     d.get("road_name", ""),
                     d.get("action", ""),

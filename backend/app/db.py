@@ -128,6 +128,15 @@ def ensure_schema():
             # additive ALTER TABLE is enough -- no rebuild needed.
             conn.exec_driver_sql("ALTER TABLE upload_log ADD COLUMN owner_type TEXT NOT NULL DEFAULT 'workspace'")
             conn.exec_driver_sql("ALTER TABLE upload_log ADD COLUMN owner_id TEXT NOT NULL DEFAULT ''")
+        if "user_id" not in log_cols:
+            # Every row that existed before this tracking shipped has no
+            # actor -- the UI reads that (owner_type='workspace' + no
+            # user_id) as "Unknown", not "Guest". Plain nullable columns,
+            # no backfill needed (NULL is the correct value already).
+            conn.exec_driver_sql("ALTER TABLE upload_log ADD COLUMN user_id INTEGER")
+            conn.exec_driver_sql("ALTER TABLE upload_log ADD COLUMN actor_name TEXT")
+            conn.exec_driver_sql("ALTER TABLE upload_log ADD COLUMN actor_email TEXT")
+            conn.exec_driver_sql("ALTER TABLE upload_log ADD COLUMN actor_avatar_url TEXT")
 
         conn.commit()
 

@@ -21,7 +21,7 @@ from app.schemas import (
     RoadPreviewDuplicate,
     RoadPreviewNew,
 )
-from app.scope import Scope, apply_scope, get_scope, owner_kwargs
+from app.scope import Scope, apply_scope, get_scope, owner_kwargs, user_kwargs
 from app.upload_log import entry_to_out, write_log_entry
 
 router = APIRouter(prefix="/api/backup", tags=["backup"])
@@ -258,6 +258,7 @@ def restore_commit(body: RestoreCommitIn, db: Session = Depends(get_db), scope: 
         total_rows=sum(len(r.segments) for r in backup.roads),
         details=log_details,
         **owner_kwargs(scope),
+        **user_kwargs(scope),
     )
     db.commit()
 

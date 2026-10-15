@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import CustomSelect from '../common/CustomSelect'
 import Pagination from '../inventory/Pagination'
-import { clearUploadLog, fetchUploadLog, getUploadLogExportUrl } from '../../api/roads'
+import { clearUploadLog, fetchUploadLog, fetchUploadLogUsers, getUploadLogExportUrl } from '../../api/roads'
 import { showConfirm, showToast } from '../common/DialogProvider'
 import { writeLastSeenLogId } from '../../utils/uploadLogSeen'
 import { useModalLayer } from '../common/useModalLayer'
@@ -140,6 +140,61 @@ function parseFieldChanges(changeSummary) {
   })
 }
 
+function initials(name) {
+  const parts = (name || '').trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '?'
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+}
+
+// Guest and "logged before this tracking existed" both arrive as no actor
+// fields -- entry.is_guest_action is what tells them apart (the backend
+// derives it from owner_type, which is always set, unlike actor_name).
+function actorInfo(entry) {
+  if (entry.is_guest_action) {
+    return { shortLabel: 'Guest', fullLabel: 'Guest', email: null, avatarUrl: null, variant: 'guest' }
+  }
+  if (entry.actor_name) {
+    return {
+      shortLabel: entry.actor_name.split(' ')[0],
+      fullLabel: entry.actor_name,
+      email: entry.actor_email,
+      avatarUrl: entry.actor_avatar_url,
+      variant: 'user',
+    }
+  }
+  return { shortLabel: 'Unknown', fullLabel: 'Unknown', email: null, avatarUrl: null, variant: 'unknown' }
+}
+
+function HistoryByAvatar({ actor }) {
+  const [failed, setFailed] = useState(false)
+  if (actor.variant === 'user' && actor.avatarUrl && !failed) {
+    return (
+      <img
+        src={actor.avatarUrl}
+        alt=""
+        className="history-by-avatar"
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+      />
+    )
+  }
+  if (actor.variant === 'user') {
+    return (
+      <span className="history-by-avatar history-by-avatar-initials" aria-hidden="true">
+        {initials(actor.fullLabel)}
+      </span>
+    )
+  }
+  return (
+    <span className={`history-by-avatar history-by-avatar-${actor.variant}`} aria-hidden="true">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+        <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 2c-3.3 0-8 1.7-8 5v1h16v-1c0-3.3-4.7-5-8-5Z" fill="currentColor" />
+      </svg>
+    </span>
+  )
+}
+
 function summaryBadges(entry) {
   const badges = []
   if (entry.added_count > 0) badges.push({ key: 'added', label: `+${entry.added_count} added` })
@@ -168,6 +223,8 @@ export default function UploadHistoryModal({ onClose, triggerRef, initialExpande
   const [search, setSearch] = useState('')
   const [action, setAction] = useState('all')
   const [dateRange, setDateRange] = useState('all')
+  const [byUser, setByUser] = useState('all')
+  const [logUsers, setLogUsers] = useState([])
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [data, setData] = useState(null)
@@ -199,10 +256,18 @@ export default function UploadHistoryModal({ onClose, triggerRef, initialExpande
       .catch(() => {})
   }, [])
 
+  // Populates the "By" filter's user list once -- only users who actually
+  // have log entries in this scope, not every account that's ever signed in.
+  useEffect(() => {
+    fetchUploadLogUsers()
+      .then(setLogUsers)
+      .catch(() => {})
+  }, [])
+
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    fetchUploadLog({ search, action, dateRange }, page, pageSize)
+    fetchUploadLog({ search, action, dateRange, byUser }, page, pageSize)
       .then((res) => {
         if (!cancelled) setData(res)
       })
@@ -212,7 +277,7 @@ export default function UploadHistoryModal({ onClose, triggerRef, initialExpande
     return () => {
       cancelled = true
     }
-  }, [search, action, dateRange, page, pageSize])
+  }, [search, action, dateRange, byUser, page, pageSize])
 
   // Focus trap + Esc + body scroll lock + return focus on close, mirroring
   // the existing Modal.jsx pattern.
@@ -276,13 +341,18 @@ export default function UploadHistoryModal({ onClose, triggerRef, initialExpande
     setPage(1)
     setData(null)
     setLoading(true)
-    const res = await fetchUploadLog({ search, action, dateRange }, 1, pageSize)
+    const res = await fetchUploadLog({ search, action, dateRange, byUser }, 1, pageSize)
     setData(res)
     setLoading(false)
   }
 
-  const exportUrl = getUploadLogExportUrl({ search, action, dateRange })
+  const exportUrl = getUploadLogExportUrl({ search, action, dateRange, byUser })
   const hasLogs = !!data && data.total_records > 0
+  const userFilterOptions = [
+    { value: 'all', label: 'All users' },
+    { value: 'me', label: 'Me' },
+    ...logUsers.map((u) => ({ value: String(u.user_id), label: u.name || 'Unknown' })),
+  ]
 
   if (zIndex == null) return null
 
@@ -409,6 +479,17 @@ export default function UploadHistoryModal({ onClose, triggerRef, initialExpande
             ariaLabel="Filter by date"
             triggerClassName="history-date-select"
           />
+          <CustomSelect
+            size="sm"
+            value={byUser}
+            onChange={(v) => {
+              setByUser(v)
+              setPage(1)
+            }}
+            options={userFilterOptions}
+            ariaLabel="Filter by user"
+            triggerClassName="history-user-select"
+          />
         </div>
 
         <div className="history-table-wrap thin-scroll">
@@ -416,6 +497,7 @@ export default function UploadHistoryModal({ onClose, triggerRef, initialExpande
             <thead>
               <tr>
                 <th>Date &amp; time</th>
+                <th>By</th>
                 <th>Source</th>
                 <th>Summary</th>
                 <th>Status</th>
@@ -425,14 +507,14 @@ export default function UploadHistoryModal({ onClose, triggerRef, initialExpande
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={5} className="history-empty-cell">
+                  <td colSpan={6} className="history-empty-cell">
                     Loading…
                   </td>
                 </tr>
               )}
               {!loading && data && data.entries.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="history-empty-cell">
+                  <td colSpan={6} className="history-empty-cell">
                     <div className="history-empty">
                       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                         <path
@@ -455,10 +537,17 @@ export default function UploadHistoryModal({ onClose, triggerRef, initialExpande
                   const fieldChanges = entry.kind === 'edit' ? parseFieldChanges(entry.details[0]?.change_summary) : []
                   const editedLabel = fieldChanges.length > 1 ? `Edited · ${fieldChanges.length} fields` : 'Edited'
                   const editParsed = entry.kind === 'edit' ? parseEditFileName(entry.file_name) : null
+                  const actor = actorInfo(entry)
                   return (
                     <Fragment key={entry.id}>
                       <tr className="history-row" onClick={() => toggleExpand(entry.id)}>
                         <td className="history-cell-nowrap">{formatDateTime(entry.timestamp)}</td>
+                        <td className="history-cell-by" title={actor.fullLabel}>
+                          <span className="history-by">
+                            <HistoryByAvatar actor={actor} />
+                            <span className="history-by-name">{actor.shortLabel}</span>
+                          </span>
+                        </td>
                         <td className="history-cell-source" title={sourceLabelShort(entry)}>
                           {sourceLabelShort(entry)}
                         </td>
@@ -492,9 +581,16 @@ export default function UploadHistoryModal({ onClose, triggerRef, initialExpande
                       </tr>
                       {expanded && (
                         <tr className="history-expand-row">
-                          <td colSpan={5}>
+                          <td colSpan={6}>
                             <div className="history-expand-body">
-                              <p className="history-expand-timestamp">{formatDateTimeFull(entry.timestamp)}</p>
+                              <p className="history-expand-timestamp">
+                                {formatDateTimeFull(entry.timestamp)}
+                                <span className="history-expand-by">
+                                  {' '}
+                                  · By {actor.fullLabel}
+                                  {actor.email ? ` (${actor.email})` : ''}
+                                </span>
+                              </p>
                               {entry.error_message && <p className="history-error-message">{entry.error_message}</p>}
                               {entry.status === 'cancelled' && (
                                 <p className="history-cancelled-note">

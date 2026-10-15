@@ -108,7 +108,7 @@ def guest_merge_commit(body: GuestMergeCommitIn, request: Request, db: Session =
     'Keep' (the existing workspace road wins) just means that one guest road
     is NOT moved -- it, and everything else left in the guest sandbox, is
     torn down at the end regardless of outcome, same as a plain discard."""
-    _require_signed_in(request, db)
+    user = _require_signed_in(request, db)
     guest_id = _guest_id(request)
     moved = replaced = kept = 0
 
@@ -196,6 +196,10 @@ def guest_merge_commit(body: GuestMergeCommitIn, request: Request, db: Session =
                 details=log_details,
                 owner_type="workspace",
                 owner_id=WORKSPACE_OWNER_ID,
+                user_id=user.id,
+                actor_name=user.name,
+                actor_email=user.email,
+                actor_avatar_url=user.avatar_url,
             )
 
         _teardown_guest(db, guest_id)

@@ -2737,6 +2737,10 @@ tbody tr:hover .row-edit-btn,
   width: 150px;
   flex-shrink: 0;
 }
+.history-user-select {
+  width: 150px;
+  flex-shrink: 0;
+}
 
 .history-table-wrap {
   overflow: auto;
@@ -2784,6 +2788,45 @@ tbody tr:hover .row-edit-btn,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.history-cell-by {
+  white-space: nowrap;
+}
+.history-by {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 110px;
+}
+.history-by-avatar {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: #fff;
+}
+.history-by-avatar-initials {
+  font-size: 9px;
+  font-weight: 700;
+}
+.history-by-avatar-guest,
+.history-by-avatar-unknown {
+  background: var(--border-strong);
+  color: var(--text-muted);
+}
+.history-by-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+.history-expand-by {
+  color: var(--text-muted);
 }
 .history-badge-row {
   display: flex;

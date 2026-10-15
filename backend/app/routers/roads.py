@@ -12,8 +12,9 @@ from starlette.responses import StreamingResponse
 from app.db import get_db
 from app.excel_import import ImportResult, TemplateError, parse_upload
 from app.models import SURFACE_TYPES, Road, RoadSegment, UploadLogEntry  # noqa: F401 -- UploadLogEntry import registers the table for create_all
-from app.scope import Scope, apply_scope, get_scope, owner_kwargs
+from app.scope import Scope, apply_scope, get_scope, owner_kwargs, user_kwargs
 from app.schemas import (
+    LogUserOut,
     NetworkSummary,
     RoadDetail,
     RoadImportedOut,
@@ -36,7 +37,7 @@ from app.schemas import (
     UploadPreview,
     UploadResult,
 )
-from app.upload_log import compare_segments, export_log_csv, query_log, write_log_entry
+from app.upload_log import compare_segments, export_log_csv, list_log_users, query_log, write_log_entry
 
 router = APIRouter(prefix="/api/roads", tags=["roads"])
 
@@ -155,6 +156,7 @@ async def upload_preview(file: UploadFile, db: Session = Depends(get_db), scope:
             file_size=len(contents),
             error_message=str(exc),
             **owner_kwargs(scope),
+            **user_kwargs(scope),
         )
         db.commit()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -333,6 +335,7 @@ def upload_commit(body: UploadCommitIn, db: Session = Depends(get_db), scope: Sc
         total_rows=result.total_rows_processed,
         details=log_details,
         **owner_kwargs(scope),
+        **user_kwargs(scope),
     )
 
     db.commit()
@@ -385,6 +388,7 @@ def upload_cancel(body: UploadCancelIn, db: Session = Depends(get_db), scope: Sc
         total_rows=total_rows,
         details=log_details,
         **owner_kwargs(scope),
+        **user_kwargs(scope),
     )
     db.commit()
     return {"logged": True}
@@ -515,6 +519,7 @@ def edit_segment(
                 }
             ],
             **owner_kwargs(scope),
+            **user_kwargs(scope),
         )
 
     db.commit()
@@ -654,6 +659,7 @@ def get_upload_log(
     search: str | None = None,
     action: str | None = None,
     date_range: str | None = None,
+    by_user: str | None = None,
     page: int = 1,
     page_size: int = 10,
     db: Session = Depends(get_db),
@@ -663,7 +669,14 @@ def get_upload_log(
         raise HTTPException(status_code=400, detail="page must be >= 1")
     if page_size < 1 or page_size > 200:
         raise HTTPException(status_code=400, detail="page_size must be between 1 and 200")
-    return query_log(db, scope=scope, search=search, action=action, date_range=date_range, page=page, page_size=page_size)
+    return query_log(
+        db, scope=scope, search=search, action=action, date_range=date_range, by_user=by_user, page=page, page_size=page_size
+    )
+
+
+@router.get("/upload-log/users", response_model=list[LogUserOut])
+def get_upload_log_users(db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
+    return list_log_users(db, scope=scope)
 
 
 @router.get("/upload-log/export")
@@ -671,10 +684,11 @@ def export_upload_log(
     search: str | None = None,
     action: str | None = None,
     date_range: str | None = None,
+    by_user: str | None = None,
     db: Session = Depends(get_db),
     scope: Scope = Depends(get_scope),
 ):
-    csv_text = export_log_csv(db, scope=scope, search=search, action=action, date_range=date_range)
+    csv_text = export_log_csv(db, scope=scope, search=search, action=action, date_range=date_range, by_user=by_user)
     return StreamingResponse(
         iter([csv_text]),
         media_type="text/csv",
@@ -731,6 +745,7 @@ def delete_road(road_id: str, db: Session = Depends(get_db), scope: Scope = Depe
         status="completed",
         details=[{"road_id": road_id, "road_name": road_name, "action": "deleted"}],
         **owner_kwargs(scope),
+        **user_kwargs(scope),
     )
     db.commit()
     return {"deleted": road_id}

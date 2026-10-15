@@ -24,6 +24,13 @@ class Scope:
     owner_type: str  # "workspace" | "guest"
     owner_id: str | None  # guest_id for guest scope, always None for workspace
     is_guest: bool
+    # The signed-in user who made this request, for "who did it" logging
+    # (Part 5) -- None for a guest. Name/email/avatar are carried here too
+    # so write_log_entry can snapshot them without a second DB lookup.
+    user_id: int | None = None
+    user_name: str | None = None
+    user_email: str | None = None
+    user_avatar_url: str | None = None
 
 
 def get_scope(request: Request, response: Response, db: Session = Depends(get_db)) -> Scope:
@@ -36,7 +43,15 @@ def get_scope(request: Request, response: Response, db: Session = Depends(get_db
       on every request so the TTL cleanup job measures idle time correctly."""
     user = get_current_user(request, db)
     if user is not None:
-        return Scope(owner_type="workspace", owner_id=None, is_guest=False)
+        return Scope(
+            owner_type="workspace",
+            owner_id=None,
+            is_guest=False,
+            user_id=user.id,
+            user_name=user.name,
+            user_email=user.email,
+            user_avatar_url=user.avatar_url,
+        )
 
     now_iso = datetime.now(timezone.utc).isoformat()
     guest_id = request.cookies.get(GUEST_COOKIE_NAME)
@@ -81,6 +96,22 @@ def owner_kwargs(scope: Scope) -> dict:
     """Stamp kwargs for constructing a new Road/UploadLogEntry row in the
     caller's current scope."""
     return {"owner_type": scope.owner_type, "owner_id": _db_owner_id(scope)}
+
+
+def user_kwargs(scope: Scope) -> dict:
+    """Actor-stamp kwargs for write_log_entry (Part 5) -- separate from
+    owner_kwargs because only UploadLogEntry has these columns; applying
+    this to a Road(...) constructor would fail with an unknown-column
+    error. All None for a guest action (UI shows "Guest") or for a
+    workspace action from before this tracking existed (UI shows
+    "Unknown") -- those two read the same four Nones differently via
+    owner_type, not via anything stored on this dict."""
+    return {
+        "user_id": scope.user_id,
+        "actor_name": scope.user_name,
+        "actor_email": scope.user_email,
+        "actor_avatar_url": scope.user_avatar_url,
+    }
 
 
 def cleanup_expired_guests(db: Session) -> int:

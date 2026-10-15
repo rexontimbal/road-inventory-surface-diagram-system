@@ -56,6 +56,7 @@ function buildUploadLogParams(filters = {}) {
   if (filters.search) params.set('search', filters.search)
   if (filters.action) params.set('action', filters.action)
   if (filters.dateRange) params.set('date_range', filters.dateRange)
+  if (filters.byUser) params.set('by_user', filters.byUser)
   return params
 }
 
@@ -63,7 +64,12 @@ export async function fetchUploadLog(filters = {}, page = 1, pageSize = 10) {
   const params = buildUploadLogParams(filters)
   params.set('page', page)
   params.set('page_size', pageSize)
-  const res = await fetch(`${BASE}/upload-log?${params.toString()}`)
+  const res = await fetch(`${BASE}/upload-log?${params.toString()}`, { credentials: 'include' })
+  return handleResponse(res)
+}
+
+export async function fetchUploadLogUsers() {
+  const res = await fetch(`${BASE}/upload-log/users`, { credentials: 'include' })
   return handleResponse(res)
 }
 
@@ -73,7 +79,7 @@ export function getUploadLogExportUrl(filters = {}) {
 }
 
 export async function clearUploadLog() {
-  const res = await fetch(`${BASE}/upload-log`, { method: 'DELETE' })
+  const res = await fetch(`${BASE}/upload-log`, { method: 'DELETE', credentials: 'include' })
   return handleResponse(res)
 }
 

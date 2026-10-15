@@ -118,6 +118,20 @@ class UploadLogEntry(Base):
     # other guests.
     owner_type = Column(String, nullable=False, default="workspace", server_default="workspace")
     owner_id = Column(String, nullable=False, default=WORKSPACE_OWNER_ID, server_default=WORKSPACE_OWNER_ID)
+    # Who performed this action (Part 5). No FK constraint -- SQLite can't
+    # add one via ALTER TABLE to an already-existing table, and this is an
+    # audit trail, not a relation the app needs to join through. NULL here
+    # means one of two things the UI tells apart via owner_type, not via
+    # this column alone: owner_type='guest' -> "Guest" (no account to
+    # attribute to); owner_type='workspace' -> "Unknown" (a workspace
+    # action logged before this tracking existed). actor_name/email/
+    # avatar_url are a snapshot of the user's profile AT THE TIME of the
+    # action, not a live join to users -- so a later Google profile rename
+    # doesn't rewrite history, and reading the log never needs a join.
+    user_id = Column(Integer, nullable=True)
+    actor_name = Column(String, nullable=True)
+    actor_email = Column(String, nullable=True)
+    actor_avatar_url = Column(String, nullable=True)
 
 
 class User(Base):
