@@ -21,6 +21,7 @@ from app.schemas import (
     RoadPreviewDuplicate,
     RoadPreviewNew,
 )
+from app.scope import Scope, apply_scope, get_scope, owner_kwargs
 from app.upload_log import entry_to_out, write_log_entry
 
 router = APIRouter(prefix="/api/backup", tags=["backup"])
@@ -41,8 +42,8 @@ def _prune_pending_restores():
 
 
 @router.get("/export", response_model=BackupExport)
-def export_backup(db: Session = Depends(get_db)):
-    roads = db.query(Road).order_by(Road.road_id).all()
+def export_backup(db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
+    roads = apply_scope(db.query(Road), Road, scope).order_by(Road.road_id).all()
     backup_roads: list[BackupRoad] = []
     total_segments = 0
     for road in roads:
@@ -74,7 +75,9 @@ def export_backup(db: Session = Depends(get_db)):
             )
         )
 
-    log_entries = db.query(UploadLogEntry).order_by(UploadLogEntry.timestamp.desc()).all()
+    log_entries = (
+        apply_scope(db.query(UploadLogEntry), UploadLogEntry, scope).order_by(UploadLogEntry.timestamp.desc()).all()
+    )
     log_out = [entry_to_out(e) for e in log_entries]
 
     return BackupExport(
@@ -88,7 +91,7 @@ def export_backup(db: Session = Depends(get_db)):
 
 
 @router.post("/restore/preview", response_model=RestorePreview)
-def restore_preview(body: RestorePreviewIn, db: Session = Depends(get_db)):
+def restore_preview(body: RestorePreviewIn, db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
     backup = body.backup
     if backup.app_name != APP_NAME:
         raise HTTPException(status_code=400, detail="This file is not a Road Inventory & Surface Diagram backup.")
@@ -99,7 +102,9 @@ def restore_preview(body: RestorePreviewIn, db: Session = Depends(get_db)):
     token = str(uuid4())
     _PENDING_RESTORES[token] = (backup, time.time() + _PENDING_TTL_SECONDS)
 
-    existing_by_key = {road.road_id.strip().lower(): road for road in db.query(Road).all()}
+    existing_by_key = {
+        road.road_id.strip().lower(): road for road in apply_scope(db.query(Road), Road, scope).all()
+    }
 
     new_roads: list[RoadPreviewNew] = []
     duplicates: list[RoadPreviewDuplicate] = []
@@ -130,8 +135,8 @@ def restore_preview(body: RestorePreviewIn, db: Session = Depends(get_db)):
                 )
             )
 
-    current_segments_count = db.query(RoadSegment).count()
-    current_logs_count = db.query(UploadLogEntry).count()
+    current_segments_count = apply_scope(db.query(RoadSegment), RoadSegment, scope).count()
+    current_logs_count = apply_scope(db.query(UploadLogEntry), UploadLogEntry, scope).count()
 
     return RestorePreview(
         token=token,
@@ -146,7 +151,7 @@ def restore_preview(body: RestorePreviewIn, db: Session = Depends(get_db)):
 
 
 @router.post("/restore/commit", response_model=RestoreResult)
-def restore_commit(body: RestoreCommitIn, db: Session = Depends(get_db)):
+def restore_commit(body: RestoreCommitIn, db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
     _prune_pending_restores()
     entry = _PENDING_RESTORES.pop(body.token, None)
     if entry is None:
@@ -161,12 +166,18 @@ def restore_commit(body: RestoreCommitIn, db: Session = Depends(get_db)):
     # Captured before any delete -- scalar columns are already loaded into
     # memory from this query, so reading them later is safe even after a
     # bulk delete below (we never touch the .segments relationship on them).
-    existing_roads = {road.road_id.strip().lower(): road for road in db.query(Road).all()}
+    existing_roads = {
+        road.road_id.strip().lower(): road for road in apply_scope(db.query(Road), Road, scope).all()
+    }
     pre_existing_keys = set(existing_roads.keys())
 
     if body.mode == "replace_all":
-        db.query(RoadSegment).delete()
-        db.query(Road).delete()
+        # Scoped deletes -- a guest's "Replace all data" must only ever wipe
+        # their own sandbox, and a signed-in user's must only wipe the
+        # shared workspace. An unscoped .delete() here would nuke every
+        # scope's data at once.
+        apply_scope(db.query(RoadSegment), RoadSegment, scope).delete()
+        apply_scope(db.query(Road), Road, scope).delete()
 
     added = replaced = kept = 0
     log_details: list[dict] = []
@@ -192,8 +203,8 @@ def restore_commit(body: RestoreCommitIn, db: Session = Depends(get_db)):
         if body.mode == "merge" and existed_before and existing_roads[key].uploaded_at:
             uploaded_at = existing_roads[key].uploaded_at
 
-        db.query(RoadSegment).filter(RoadSegment.road_id == br.road_id).delete()
-        db.query(Road).filter(Road.road_id == br.road_id).delete()
+        apply_scope(db.query(RoadSegment), RoadSegment, scope).filter(RoadSegment.road_id == br.road_id).delete()
+        apply_scope(db.query(Road), Road, scope).filter(Road.road_id == br.road_id).delete()
 
         road = Road(
             road_id=br.road_id,
@@ -203,6 +214,7 @@ def restore_commit(body: RestoreCommitIn, db: Session = Depends(get_db)):
             source_file=br.source_file,
             segment_count=br.segment_count,
             total_length_m=br.total_length_m,
+            **owner_kwargs(scope),
         )
         db.add(road)
         for seg in br.segments:
@@ -219,6 +231,7 @@ def restore_commit(body: RestoreCommitIn, db: Session = Depends(get_db)):
                     shoulder_left=seg.shoulder_left,
                     shoulder_right=seg.shoulder_right,
                     source_row_number=seg.seq_no + 1,
+                    **owner_kwargs(scope),
                 )
             )
 
@@ -244,8 +257,9 @@ def restore_commit(body: RestoreCommitIn, db: Session = Depends(get_db)):
         file_name=f"Backup from {backup.exported_at}",
         total_rows=sum(len(r.segments) for r in backup.roads),
         details=log_details,
+        **owner_kwargs(scope),
     )
     db.commit()
 
-    total_roads = db.query(Road).count()
+    total_roads = apply_scope(db.query(Road), Road, scope).count()
     return RestoreResult(added=added, replaced=replaced, kept=kept, total_roads=total_roads)

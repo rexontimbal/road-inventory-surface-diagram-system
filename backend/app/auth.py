@@ -3,11 +3,14 @@ import time
 import uuid
 
 import jwt
-from fastapi import Request
+from fastapi import Depends, Request
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
+from sqlalchemy.orm import Session
 
 from app import config  # noqa: F401 -- loads backend/.env before the os.environ reads below
+from app.db import get_db
+from app.models import User
 
 SESSION_COOKIE_NAME = "session"
 SESSION_TTL_SECONDS = 7 * 24 * 60 * 60  # 7 days
@@ -66,3 +69,17 @@ def cookie_kwargs(request: Request, max_age: int | None = SESSION_TTL_SECONDS) -
     if max_age is not None:
         kwargs["max_age"] = max_age
     return kwargs
+
+
+def get_current_user(request: Request, db: Session = Depends(get_db)):
+    """FastAPI dependency: the signed-in user for this request, or None for
+    a guest/anonymous visitor -- callers decide whether that's allowed, this
+    never raises on its own. Lives here (not in routers/auth.py) so
+    app/scope.py can depend on it without importing a router module."""
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    if not token:
+        return None
+    user_id = decode_session_token(token)
+    if user_id is None:
+        return None
+    return db.query(User).filter(User.id == user_id).first()

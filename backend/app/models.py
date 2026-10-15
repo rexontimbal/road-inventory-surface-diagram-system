@@ -1,7 +1,7 @@
 from sqlalchemy import (
     CheckConstraint,
     Column,
-    ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -14,11 +14,27 @@ from app.db import Base
 
 SURFACE_TYPES = ("unpaved", "paved", "gravel", "asphalt")
 
+# Sentinel used for owner_id on every "workspace" row instead of NULL. SQL
+# UNIQUE/PRIMARY KEY constraints treat every NULL as distinct from every
+# other NULL, so two workspace rows with the same road_id and owner_id=NULL
+# would NOT violate uniqueness -- '' (never a real guest_id, which is always
+# a hex token) makes the composite key actually enforce one road_id per
+# scope. Scope.owner_id itself stays None at the API/app layer (app/scope.py
+# translates between the two at the DB boundary).
+WORKSPACE_OWNER_ID = ""
+
 
 class Road(Base):
     __tablename__ = "roads"
 
+    # Composite primary key -- road_id is NOT globally unique on its own,
+    # only unique within one scope. Without owner_type/owner_id in the key,
+    # a guest uploading the same sample file as the shared workspace (an
+    # entirely expected, common case) would collide on road_id and corrupt
+    # or block each other's data instead of staying isolated.
     road_id = Column(String, primary_key=True)
+    owner_type = Column(String, primary_key=True, default="workspace", server_default="workspace")
+    owner_id = Column(String, primary_key=True, default=WORKSPACE_OWNER_ID, server_default=WORKSPACE_OWNER_ID)
     road_name = Column(String, nullable=False)
     updated_at = Column(String, nullable=False)
     uploaded_at = Column(String, nullable=True)
@@ -38,7 +54,9 @@ class RoadSegment(Base):
     __tablename__ = "road_segments"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    road_id = Column(String, ForeignKey("roads.road_id", ondelete="CASCADE"), nullable=False)
+    road_id = Column(String, nullable=False)
+    owner_type = Column(String, nullable=False, default="workspace", server_default="workspace")
+    owner_id = Column(String, nullable=False, default=WORKSPACE_OWNER_ID, server_default=WORKSPACE_OWNER_ID)
     seq_no = Column(Integer, nullable=False)
     start_station_raw = Column(String, nullable=False)
     end_station_raw = Column(String, nullable=False)
@@ -53,11 +71,16 @@ class RoadSegment(Base):
     road = relationship("Road", back_populates="segments")
 
     __table_args__ = (
-        UniqueConstraint("road_id", "seq_no", name="uq_road_seq"),
+        ForeignKeyConstraint(
+            ["road_id", "owner_type", "owner_id"],
+            ["roads.road_id", "roads.owner_type", "roads.owner_id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("road_id", "owner_type", "owner_id", "seq_no", name="uq_road_seq"),
         CheckConstraint(f"surface_type IN {SURFACE_TYPES}", name="ck_surface_type"),
         CheckConstraint(f"shoulder_left IN {SURFACE_TYPES}", name="ck_shoulder_left"),
         CheckConstraint(f"shoulder_right IN {SURFACE_TYPES}", name="ck_shoulder_right"),
-        Index("idx_segments_road_start", "road_id", "start_m"),
+        Index("idx_segments_road_start", "road_id", "owner_type", "owner_id", "start_m"),
     )
 
 
@@ -90,11 +113,15 @@ class UploadLogEntry(Base):
     # rather than a child table -- it's always read/written as a whole with
     # its parent entry, never queried independently.
     details_json = Column(Text, nullable=False, default="[]")
+    # Same scoping as Road.owner_type/owner_id above -- a guest's own
+    # upload-history entries, never visible to the shared workspace or to
+    # other guests.
+    owner_type = Column(String, nullable=False, default="workspace", server_default="workspace")
+    owner_id = Column(String, nullable=False, default=WORKSPACE_OWNER_ID, server_default=WORKSPACE_OWNER_ID)
 
 
 class User(Base):
-    """A signed-in Google account. Schema only for now -- nothing writes or
-    reads this table until the auth endpoints (Part 2) exist."""
+    """A signed-in Google account."""
 
     __tablename__ = "users"
 
@@ -108,10 +135,10 @@ class User(Base):
 
 
 class GuestSession(Base):
-    """One row per guest cookie. Tracks last_activity_at so a cleanup pass
-    (Part 4) can find and delete guests idle past GUEST_DATA_TTL_MINUTES,
-    along with whatever roads/segments/log entries they own -- schema only
-    for now, nothing writes or reads this table until guest mode exists."""
+    """One row per guest cookie. Tracks last_activity_at so the periodic
+    cleanup job (app/scope.py) can find and delete guests idle past
+    GUEST_DATA_TTL_MINUTES, along with whatever roads/segments/log entries
+    they own."""
 
     __tablename__ = "guest_sessions"
 

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Header, { openHowToUse } from './components/Header'
+import GuestNotice from './components/GuestNotice'
+import GuestMergeModal from './components/auth/GuestMergeModal'
 import UploadPanel from './components/sidebar/UploadPanel'
 import RoadSelectPanel from './components/sidebar/RoadSelectPanel'
 import DiagramSettingsPanel from './components/sidebar/DiagramSettingsPanel'
@@ -16,6 +18,7 @@ import {
 import { formatStation, parseStationInput } from './utils/chainage'
 import { readUploadMeta, writeUploadMeta } from './utils/uploadMeta'
 import { fetchMe, signInWithGoogle, signOut } from './api/auth'
+import { fetchGuestStatus } from './api/guest'
 import { showToast } from './components/common/DialogProvider'
 import './App.css'
 
@@ -55,8 +58,10 @@ export default function App() {
   // before the /api/auth/me check resolves.
   const [authUser, setAuthUser] = useState(null)
   const [authChecked, setAuthChecked] = useState(false)
+  const [guestMergeOpen, setGuestMergeOpen] = useState(false)
   const uploadPanelRef = useRef(null)
   const diagramPanelRef = useRef(null)
+  const headerRef = useRef(null)
 
   useEffect(() => {
     fetchMe()
@@ -64,6 +69,19 @@ export default function App() {
       .catch(() => setAuthUser(null))
       .finally(() => setAuthChecked(true))
   }, [])
+
+  // Signing in/out (or resolving a guest merge) switches which scope's data
+  // the backend returns for every read -- the road list, table, diagram
+  // selection, and network summary already on screen are for the OLD scope
+  // and must be dropped, not just left stale underneath the new state.
+  async function refreshAfterScopeChange() {
+    setSelectedRoadId('')
+    setRoadDetail(null)
+    setGeneratedRange(null)
+    setHasGenerated(false)
+    setTablePage(1)
+    await Promise.all([refreshRoads(), refreshSegmentsPage(1, tableFilters, tableSort), refreshSummary()])
+  }
 
   // Deliberately rethrows on failure instead of catching -- SignInModal is
   // the caller for this (its Google button lives inside the modal), and it
@@ -74,6 +92,20 @@ export default function App() {
     const res = await signInWithGoogle(idToken)
     setAuthUser(res.user)
     showToast({ variant: 'success', message: `Signed in as ${res.user.name}` })
+    const guestStatus = await fetchGuestStatus().catch(() => null)
+    if (guestStatus?.has_data) {
+      setGuestMergeOpen(true)
+    } else {
+      await refreshAfterScopeChange()
+    }
+  }
+
+  // GuestMergeModal itself already shows its own success/failure toast for
+  // the move/discard action -- this just refreshes the now-current scope's
+  // data once the modal is done, whichever way the user resolved it.
+  async function handleGuestMergeDone() {
+    setGuestMergeOpen(false)
+    await refreshAfterScopeChange()
   }
 
   function handleOpenHistoryFromHeader() {
@@ -85,6 +117,7 @@ export default function App() {
       await signOut()
       setAuthUser(null)
       showToast({ variant: 'info', message: 'Signed out' })
+      await refreshAfterScopeChange()
     } catch (err) {
       showToast({ variant: 'danger', message: `Sign-out failed: ${err.message}` })
     }
@@ -363,6 +396,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <Header
+        ref={headerRef}
         summary={networkSummary}
         lastUploadAt={uploadMeta ? new Date(uploadMeta.uploadedAt) : null}
         networkSummaryOpen={networkSummaryOpen}
@@ -373,6 +407,11 @@ export default function App() {
         onSignOut={handleSignOut}
         onOpenHistory={handleOpenHistoryFromHeader}
       />
+      <GuestNotice
+        isGuest={authChecked && !authUser}
+        onSignInClick={() => headerRef.current?.openSignIn()}
+      />
+      {guestMergeOpen && <GuestMergeModal onDone={handleGuestMergeDone} />}
       <div className="main-layout">
         <aside className={`sidebar${sidebarCollapsed ? ' collapsed' : ''}`}>
           <button

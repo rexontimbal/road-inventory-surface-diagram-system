@@ -16,6 +16,42 @@
   }
 }
 
+/* Deliberately NOT position:fixed/sticky -- normal document flow, right
+   after the header's spacer. The header's own shrink-on-scroll logic (see
+   .app-header-spacer above) exists specifically because fixed elements
+   reacting to scroll caused a flicker bug; this banner scrolls away with
+   the page instead of adding a second fixed layer that could repeat it. */
+.guest-notice {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 20px;
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--warning);
+}
+.guest-notice svg {
+  flex-shrink: 0;
+}
+.guest-notice-link {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--warning);
+  font-weight: 700;
+  text-decoration: underline;
+}
+.guest-notice-link:hover {
+  opacity: 0.8;
+}
+@media print {
+  .guest-notice {
+    display: none;
+  }
+}
+
 /* Reusable thin, blue-tinted scrollbar for scrollable panels throughout
    the app (upload summary, inventory table, diagram wrap, chip rows).
    The scrollbar-width/-color pair below is gated to browsers without

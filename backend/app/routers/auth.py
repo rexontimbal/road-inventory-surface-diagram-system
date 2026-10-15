@@ -7,7 +7,7 @@ from app.auth import (
     SESSION_COOKIE_NAME,
     cookie_kwargs,
     create_session_token,
-    decode_session_token,
+    get_current_user,
     verify_google_id_token,
 )
 from app.db import get_db
@@ -19,19 +19,6 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 def _user_out(user: User) -> UserOut:
     return UserOut(id=user.id, name=user.name, email=user.email, avatar_url=user.avatar_url)
-
-
-def get_current_user(request: Request, db: Session = Depends(get_db)) -> User | None:
-    """FastAPI dependency: the signed-in user for this request, or None for
-    a guest/anonymous visitor -- callers decide whether that's allowed, this
-    never raises on its own."""
-    token = request.cookies.get(SESSION_COOKIE_NAME)
-    if not token:
-        return None
-    user_id = decode_session_token(token)
-    if user_id is None:
-        return None
-    return db.query(User).filter(User.id == user_id).first()
 
 
 @router.post("/google")

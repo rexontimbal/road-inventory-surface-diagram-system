@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { showAlert } from './common/DialogProvider'
 import SignInModal from './auth/SignInModal'
 import UserMenu from './auth/UserMenu'
@@ -71,21 +71,30 @@ export function openHowToUse() {
   })
 }
 
-export default function Header({
-  summary,
-  lastUploadAt,
-  networkSummaryOpen,
-  onToggleNetworkSummary,
-  authUser,
-  authChecked,
-  onGoogleCredential,
-  onSignOut,
-  onOpenHistory,
-}) {
+const Header = forwardRef(function Header(
+  {
+    summary,
+    lastUploadAt,
+    networkSummaryOpen,
+    onToggleNetworkSummary,
+    authUser,
+    authChecked,
+    onGoogleCredential,
+    onSignOut,
+    onOpenHistory,
+  },
+  ref
+) {
   const [shrunk, setShrunk] = useState(false)
   const [signInOpen, setSignInOpen] = useState(false)
   const shrunkRef = useRef(false)
   const tickingRef = useRef(false)
+
+  // Lets GuestNotice's "Sign in" link (a sibling of Header, not a child)
+  // open this same modal instead of duplicating sign-in UI elsewhere.
+  useImperativeHandle(ref, () => ({
+    openSignIn: () => setSignInOpen(true),
+  }))
 
   useEffect(() => {
     function applyScrollState() {
@@ -228,4 +237,6 @@ export default function Header({
     )}
     </>
   )
-}
+})
+
+export default Header

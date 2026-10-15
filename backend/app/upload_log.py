@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.models import UploadLogEntry
 from app.schemas import LogRoadDetail, UploadLogOut, UploadLogPage
+from app.scope import apply_scope
 
 _DATE_RANGE_DAYS = {"today": 1, "7d": 7, "30d": 30}
 
@@ -50,9 +51,14 @@ def write_log_entry(
     total_rows: int | None = None,
     error_message: str | None = None,
     details: list[dict] | None = None,
+    owner_type: str = "workspace",
+    owner_id: str = "",
 ) -> UploadLogEntry:
     """Adds a log row to the session -- caller commits it as part of the
-    same transaction as the data change it describes."""
+    same transaction as the data change it describes. owner_type/owner_id
+    default to the shared workspace so every pre-existing call site (and
+    any test that doesn't care about scoping) keeps working unchanged;
+    real callers pass **owner_kwargs(scope)."""
     details = details or []
     counts = {
         "added": 0,
@@ -83,6 +89,8 @@ def write_log_entry(
         deleted_count=counts["deleted"],
         edited_count=counts["edited"],
         details_json=json.dumps(details),
+        owner_type=owner_type,
+        owner_id=owner_id,
     )
     db.add(entry)
     return entry
@@ -134,8 +142,8 @@ def _matches_filters(entry: UploadLogEntry, search: str | None, action: str | No
     return True
 
 
-def _filtered_entries(db, *, search, action, date_range):
-    query = db.query(UploadLogEntry).order_by(UploadLogEntry.timestamp.desc())
+def _filtered_entries(db, *, scope, search, action, date_range):
+    query = apply_scope(db.query(UploadLogEntry), UploadLogEntry, scope).order_by(UploadLogEntry.timestamp.desc())
     days = _DATE_RANGE_DAYS.get(date_range) if date_range else None
     if days:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
@@ -145,8 +153,8 @@ def _filtered_entries(db, *, search, action, date_range):
     return [e for e in query.all() if _matches_filters(e, search, action)]
 
 
-def query_log(db, *, search=None, action=None, date_range=None, page=1, page_size=10) -> UploadLogPage:
-    filtered = _filtered_entries(db, search=search, action=action, date_range=date_range)
+def query_log(db, *, scope, search=None, action=None, date_range=None, page=1, page_size=10) -> UploadLogPage:
+    filtered = _filtered_entries(db, scope=scope, search=search, action=action, date_range=date_range)
     total_records = len(filtered)
     total_pages = max(1, (total_records + page_size - 1) // page_size)
     start = (page - 1) * page_size
@@ -160,8 +168,8 @@ def query_log(db, *, search=None, action=None, date_range=None, page=1, page_siz
     )
 
 
-def export_log_csv(db, *, search=None, action=None, date_range=None) -> str:
-    filtered = _filtered_entries(db, search=search, action=action, date_range=date_range)
+def export_log_csv(db, *, scope, search=None, action=None, date_range=None) -> str:
+    filtered = _filtered_entries(db, scope=scope, search=search, action=action, date_range=date_range)
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)

@@ -12,6 +12,7 @@ from starlette.responses import StreamingResponse
 from app.db import get_db
 from app.excel_import import ImportResult, TemplateError, parse_upload
 from app.models import SURFACE_TYPES, Road, RoadSegment, UploadLogEntry  # noqa: F401 -- UploadLogEntry import registers the table for create_all
+from app.scope import Scope, apply_scope, get_scope, owner_kwargs
 from app.schemas import (
     NetworkSummary,
     RoadDetail,
@@ -78,11 +79,21 @@ _SORT_COLUMNS = {
 }
 
 
-def _filtered_segments_query(db, road_id, status, surface_type):
+def _filtered_segments_query(db, scope: Scope, road_id, status, surface_type):
     if status is not None and status not in ("Complete", "Incomplete"):
         raise HTTPException(status_code=400, detail="status must be 'Complete' or 'Incomplete'")
 
-    query = db.query(RoadSegment, Road.road_name).join(Road, Road.road_id == RoadSegment.road_id)
+    # road_id alone is no longer unique across scopes (see Road's composite
+    # primary key) -- the join must match the full (road_id, owner_type,
+    # owner_id) triple, or a guest's segment could join against the
+    # workspace's same-road_id road (or vice versa) and leak its road_name.
+    query = db.query(RoadSegment, Road.road_name).join(
+        Road,
+        (Road.road_id == RoadSegment.road_id)
+        & (Road.owner_type == RoadSegment.owner_type)
+        & (Road.owner_id == RoadSegment.owner_id),
+    )
+    query = apply_scope(query, Road, scope)
 
     if road_id:
         query = query.filter(RoadSegment.road_id == road_id)
@@ -124,11 +135,14 @@ def _rejected_out(result: ImportResult) -> list[RoadRejectionOut]:
 
 
 @router.post("/upload/preview", response_model=UploadPreview)
-async def upload_preview(file: UploadFile, db: Session = Depends(get_db)):
+async def upload_preview(file: UploadFile, db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
     """Parses and validates the file (same rules as before) but writes
     nothing. Splits accepted roads into brand-new vs. Road-ID conflicts with
     an existing road (trimmed, case-insensitive match) so the frontend can
-    ask the user how to handle each conflict before anything is saved."""
+    ask the user how to handle each conflict before anything is saved.
+    "Existing" only ever means within the caller's own scope -- a guest's
+    upload can never conflict with (or even see) the shared workspace's
+    roads, and vice versa."""
     contents = await file.read()
     try:
         result = parse_upload(contents)
@@ -140,6 +154,7 @@ async def upload_preview(file: UploadFile, db: Session = Depends(get_db)):
             file_name=file.filename,
             file_size=len(contents),
             error_message=str(exc),
+            **owner_kwargs(scope),
         )
         db.commit()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -148,7 +163,9 @@ async def upload_preview(file: UploadFile, db: Session = Depends(get_db)):
     token = str(uuid4())
     _PENDING_UPLOADS[token] = (result, file.filename, len(contents), time.time() + _PENDING_TTL_SECONDS)
 
-    existing_by_key = {road.road_id.strip().lower(): road for road in db.query(Road).all()}
+    existing_by_key = {
+        road.road_id.strip().lower(): road for road in apply_scope(db.query(Road), Road, scope).all()
+    }
 
     new_roads: list[RoadPreviewNew] = []
     duplicates: list[RoadPreviewDuplicate] = []
@@ -191,7 +208,7 @@ async def upload_preview(file: UploadFile, db: Session = Depends(get_db)):
 
 
 @router.post("/upload/commit", response_model=UploadResult)
-def upload_commit(body: UploadCommitIn, db: Session = Depends(get_db)):
+def upload_commit(body: UploadCommitIn, db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
     """Applies a previously-previewed upload. `decisions` only needs entries
     for road IDs that were flagged as duplicates in the preview -- any
     accepted road with no decision (i.e. it was new, no conflict) is always
@@ -206,7 +223,9 @@ def upload_commit(body: UploadCommitIn, db: Session = Depends(get_db)):
         )
     result, source_file, file_size, _ = entry
 
-    existing_by_key = {road.road_id.strip().lower(): road for road in db.query(Road).all()}
+    existing_by_key = {
+        road.road_id.strip().lower(): road for road in apply_scope(db.query(Road), Road, scope).all()
+    }
 
     now = datetime.now(timezone.utc).isoformat()
     imported: list[RoadImportedOut] = []
@@ -243,8 +262,8 @@ def upload_commit(body: UploadCommitIn, db: Session = Depends(get_db)):
 
         uploaded_at = existing.uploaded_at if existing is not None and existing.uploaded_at else now
 
-        db.query(RoadSegment).filter(RoadSegment.road_id == plan.road_id).delete()
-        db.query(Road).filter(Road.road_id == plan.road_id).delete()
+        apply_scope(db.query(RoadSegment), RoadSegment, scope).filter(RoadSegment.road_id == plan.road_id).delete()
+        apply_scope(db.query(Road), Road, scope).filter(Road.road_id == plan.road_id).delete()
 
         road = Road(
             road_id=plan.road_id,
@@ -254,6 +273,7 @@ def upload_commit(body: UploadCommitIn, db: Session = Depends(get_db)):
             source_file=source_file,
             segment_count=len(plan.segments),
             total_length_m=plan.total_length_m,
+            **owner_kwargs(scope),
         )
         db.add(road)
 
@@ -271,6 +291,7 @@ def upload_commit(body: UploadCommitIn, db: Session = Depends(get_db)):
                     shoulder_left=seg.shoulder_left,
                     shoulder_right=seg.shoulder_right,
                     source_row_number=seg.row_number,
+                    **owner_kwargs(scope),
                 )
             )
 
@@ -311,6 +332,7 @@ def upload_commit(body: UploadCommitIn, db: Session = Depends(get_db)):
         file_size=file_size,
         total_rows=result.total_rows_processed,
         details=log_details,
+        **owner_kwargs(scope),
     )
 
     db.commit()
@@ -326,7 +348,7 @@ def upload_commit(body: UploadCommitIn, db: Session = Depends(get_db)):
 
 
 @router.post("/upload/cancel")
-def upload_cancel(body: UploadCancelIn, db: Session = Depends(get_db)):
+def upload_cancel(body: UploadCancelIn, db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
     """Logs a cancelled upload (whatever the preview found, nothing applied)
     and discards the pending token. Safe to call even if the token already
     expired -- still logs a minimal cancelled entry."""
@@ -362,14 +384,15 @@ def upload_cancel(body: UploadCancelIn, db: Session = Depends(get_db)):
         file_size=file_size,
         total_rows=total_rows,
         details=log_details,
+        **owner_kwargs(scope),
     )
     db.commit()
     return {"logged": True}
 
 
 @router.get("", response_model=list[RoadSummary])
-def list_roads(db: Session = Depends(get_db)):
-    roads = db.query(Road).order_by(Road.road_id).all()
+def list_roads(db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
+    roads = apply_scope(db.query(Road), Road, scope).order_by(Road.road_id).all()
     return [RoadSummary(road_id=r.road_id, road_name=r.road_name) for r in roads]
 
 
@@ -383,13 +406,14 @@ def list_segments(
     sort_by: str | None = None,
     sort_dir: str = "asc",
     db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
 ):
     if page < 1:
         raise HTTPException(status_code=400, detail="page must be >= 1")
     if page_size < 1 or page_size > 500:
         raise HTTPException(status_code=400, detail="page_size must be between 1 and 500")
 
-    base_query = _filtered_segments_query(db, road_id, status, surface_type)
+    base_query = _filtered_segments_query(db, scope, road_id, status, surface_type)
     total_records = base_query.count()
     total_pages = max(1, (total_records + page_size - 1) // page_size)
 
@@ -435,16 +459,22 @@ _EDITABLE_FIELD_LABELS = {
 
 
 @router.patch("/segments/{segment_id}", response_model=SegmentEditOut)
-def edit_segment(segment_id: int, body: SegmentEditIn, db: Session = Depends(get_db)):
+def edit_segment(
+    segment_id: int, body: SegmentEditIn, db: Session = Depends(get_db), scope: Scope = Depends(get_scope)
+):
     """Inline table edit for a single segment -- stations are intentionally
     not editable here (that risks creating gaps/overlaps with neighboring
     segments; those still require a full Excel re-upload). Any actual change
     bumps the parent road's updated_at and writes one 'edit' log entry so
     there's an audit trail, same as every other data-changing action."""
-    seg = db.query(RoadSegment).filter(RoadSegment.id == segment_id).first()
+    # id alone is globally unique (not part of the scoping key), so without
+    # the scope filter a guest could edit another scope's segment just by
+    # guessing/incrementing an id -- scoped out here means "not found",
+    # same as if it never existed, rather than a separate 403.
+    seg = apply_scope(db.query(RoadSegment), RoadSegment, scope).filter(RoadSegment.id == segment_id).first()
     if seg is None:
         raise HTTPException(status_code=404, detail="Segment not found")
-    road = db.query(Road).filter(Road.road_id == seg.road_id).first()
+    road = apply_scope(db.query(Road), Road, scope).filter(Road.road_id == seg.road_id).first()
 
     if body.num_lanes is not None and not (1 <= body.num_lanes <= 12):
         raise HTTPException(status_code=400, detail="Number of Lanes must be between 1 and 12")
@@ -484,6 +514,7 @@ def edit_segment(segment_id: int, body: SegmentEditIn, db: Session = Depends(get
                     "change_summary": "; ".join(f"{c['field']}: {c['old']} → {c['new']}" for c in change_dicts),
                 }
             ],
+            **owner_kwargs(scope),
         )
 
     db.commit()
@@ -515,8 +546,9 @@ def export_segments(
     sort_by: str | None = None,
     sort_dir: str = "asc",
     db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
 ):
-    base_query = _filtered_segments_query(db, road_id, status, surface_type)
+    base_query = _filtered_segments_query(db, scope, road_id, status, surface_type)
     rows = _apply_sort(base_query, sort_by, sort_dir).all()
 
     buffer = io.StringIO()
@@ -558,20 +590,31 @@ def export_segments(
 
 
 @router.get("/summary", response_model=NetworkSummary)
-def get_network_summary(db: Session = Depends(get_db)):
+def get_network_summary(db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
     road_stats = (
-        db.query(
-            Road.road_id,
-            Road.road_name,
-            func.sum(RoadSegment.end_m - RoadSegment.start_m).label("total_length_m"),
-            func.sum(
-                case(
-                    (RoadSegment.surface_type == "asphalt", RoadSegment.end_m - RoadSegment.start_m),
-                    else_=0,
-                )
-            ).label("asphalt_length_m"),
+        apply_scope(
+            db.query(
+                Road.road_id,
+                Road.road_name,
+                func.sum(RoadSegment.end_m - RoadSegment.start_m).label("total_length_m"),
+                func.sum(
+                    case(
+                        (RoadSegment.surface_type == "asphalt", RoadSegment.end_m - RoadSegment.start_m),
+                        else_=0,
+                    )
+                ).label("asphalt_length_m"),
+            ),
+            Road,
+            scope,
         )
-        .join(RoadSegment, RoadSegment.road_id == Road.road_id)
+        # Full composite join -- see _filtered_segments_query's comment on
+        # why road_id alone is not enough to match the right scope's rows.
+        .join(
+            RoadSegment,
+            (RoadSegment.road_id == Road.road_id)
+            & (RoadSegment.owner_type == Road.owner_type)
+            & (RoadSegment.owner_id == Road.owner_id),
+        )
         .group_by(Road.road_id, Road.road_name)
         .order_by(Road.road_id)
         .all()
@@ -614,12 +657,13 @@ def get_upload_log(
     page: int = 1,
     page_size: int = 10,
     db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
 ):
     if page < 1:
         raise HTTPException(status_code=400, detail="page must be >= 1")
     if page_size < 1 or page_size > 200:
         raise HTTPException(status_code=400, detail="page_size must be between 1 and 200")
-    return query_log(db, search=search, action=action, date_range=date_range, page=page, page_size=page_size)
+    return query_log(db, scope=scope, search=search, action=action, date_range=date_range, page=page, page_size=page_size)
 
 
 @router.get("/upload-log/export")
@@ -628,8 +672,9 @@ def export_upload_log(
     action: str | None = None,
     date_range: str | None = None,
     db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
 ):
-    csv_text = export_log_csv(db, search=search, action=action, date_range=date_range)
+    csv_text = export_log_csv(db, scope=scope, search=search, action=action, date_range=date_range)
     return StreamingResponse(
         iter([csv_text]),
         media_type="text/csv",
@@ -638,15 +683,15 @@ def export_upload_log(
 
 
 @router.delete("/upload-log")
-def clear_upload_log(db: Session = Depends(get_db)):
-    count = db.query(UploadLogEntry).delete()
+def clear_upload_log(db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
+    count = apply_scope(db.query(UploadLogEntry), UploadLogEntry, scope).delete()
     db.commit()
     return {"cleared": count}
 
 
 @router.get("/{road_id}", response_model=RoadDetail)
-def get_road_detail(road_id: str, db: Session = Depends(get_db)):
-    road = db.query(Road).filter(Road.road_id == road_id).first()
+def get_road_detail(road_id: str, db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
+    road = apply_scope(db.query(Road), Road, scope).filter(Road.road_id == road_id).first()
     if road is None:
         raise HTTPException(status_code=404, detail=f"Road '{road_id}' not found")
 
@@ -674,8 +719,8 @@ def get_road_detail(road_id: str, db: Session = Depends(get_db)):
 
 
 @router.delete("/{road_id}")
-def delete_road(road_id: str, db: Session = Depends(get_db)):
-    road = db.query(Road).filter(Road.road_id == road_id).first()
+def delete_road(road_id: str, db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
+    road = apply_scope(db.query(Road), Road, scope).filter(Road.road_id == road_id).first()
     if road is None:
         raise HTTPException(status_code=404, detail=f"Road '{road_id}' not found")
     road_name = road.road_name
@@ -685,6 +730,7 @@ def delete_road(road_id: str, db: Session = Depends(get_db)):
         kind="delete",
         status="completed",
         details=[{"road_id": road_id, "road_name": road_name, "action": "deleted"}],
+        **owner_kwargs(scope),
     )
     db.commit()
     return {"deleted": road_id}

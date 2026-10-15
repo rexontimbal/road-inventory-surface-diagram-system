@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import os
 from pathlib import Path
 
@@ -7,8 +9,9 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse
 
 from app import config  # noqa: F401 -- loads backend/.env before the os.environ reads below (this app, db, auth)
-from app.db import Base, engine, ensure_schema
-from app.routers import auth, backup, roads
+from app.db import Base, SessionLocal, engine, ensure_schema
+from app.routers import auth, backup, guest, roads
+from app.scope import GUEST_CLEANUP_INTERVAL_MINUTES, cleanup_expired_guests
 
 Base.metadata.create_all(bind=engine)
 ensure_schema()
@@ -20,7 +23,39 @@ SESSION_SECRET_CONFIGURED = bool(os.environ.get("SESSION_SECRET"))
 print(f"GOOGLE_CLIENT_ID configured: {'yes' if GOOGLE_CLIENT_ID_CONFIGURED else 'no'}")
 print(f"SESSION_SECRET configured: {'yes' if SESSION_SECRET_CONFIGURED else 'no'}")
 
-app = FastAPI(title="Road Inventory & Surface Diagram System")
+async def _guest_cleanup_loop():
+    """Runs for the lifetime of the process, reaping guest data idle past
+    GUEST_DATA_TTL_MINUTES -- once immediately on startup (so a restart
+    during testing with a short TTL doesn't leave stale data sitting until
+    the first tick), then every GUEST_CLEANUP_INTERVAL_MINUTES after that. A
+    fresh session is opened per tick (not reused across sleeps) since this
+    is a long-lived background loop, not a per-request session."""
+    interval_seconds = GUEST_CLEANUP_INTERVAL_MINUTES * 60
+    while True:
+        db = SessionLocal()
+        try:
+            reaped = cleanup_expired_guests(db)
+            if reaped:
+                print(f"Guest cleanup: removed {reaped} expired guest session(s)")
+        except Exception as exc:  # noqa: BLE001 -- a bad tick must not kill the loop
+            print(f"Guest cleanup tick failed: {exc}")
+        finally:
+            db.close()
+        await asyncio.sleep(interval_seconds)
+
+
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = asyncio.create_task(_guest_cleanup_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+app = FastAPI(title="Road Inventory & Surface Diagram System", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,6 +73,7 @@ app.add_middleware(
 app.include_router(roads.router)
 app.include_router(backup.router)
 app.include_router(auth.router)
+app.include_router(guest.router)
 
 
 @app.get("/api/health")
