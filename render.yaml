@@ -4,6 +4,14 @@ services:
     runtime: python
     plan: free
     region: singapore
+    # Pinned explicitly. Render's Blueprint sync, when previewed from a
+    # branch other than this service's actual deploy branch (e.g. this repo's
+    # enhancements branch, where this file also lives), otherwise infers "no
+    # branch specified" as "use the branch the Blueprint is being synced
+    # from" -- which is exactly what proposed switching this live service to
+    # enhancements. Explicit branch: main makes that impossible regardless of
+    # which branch render.yaml is read from.
+    branch: main
     buildCommand: >-
       cd backend && pip install -r requirements.txt &&
       cd ../frontend && npm install && npm run build
@@ -12,39 +20,10 @@ services:
       - key: PYTHON_VERSION
         value: 3.12.10
 
-  # Staging service for the enhancements branch (Google Sign-in, guest mode,
-  # user tracking) -- separate from the service above so that work can be
-  # tested online without touching the main service's data or deploys.
-  - type: web
-    name: road-inventory-enhancements
-    runtime: python
-    plan: free
-    region: singapore
-    branch: enhancements
-    buildCommand: >-
-      cd backend && pip install -r requirements.txt &&
-      cd ../frontend && npm install && npm run build
-    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.12.10
-      # Public value (the Google API explicitly expects this to be visible
-      # client-side), safe to commit -- see backend/.env.example for what
-      # this pairs with.
-      - key: GOOGLE_CLIENT_ID
-        value: 740281090488-tslhu1h0crhasu0vj2g9qjfhkg016lvm.apps.googleusercontent.com
-      # Same Client ID -- VITE_GOOGLE_CLIENT_ID is read at BUILD time (it
-      # gets baked into the compiled frontend bundle by `npm run build`
-      # above), GOOGLE_CLIENT_ID is read at runtime by the backend. Both
-      # must be set for Google Sign-in to work at all.
-      - key: VITE_GOOGLE_CLIENT_ID
-        value: 740281090488-tslhu1h0crhasu0vj2g9qjfhkg016lvm.apps.googleusercontent.com
-      # Render generates and stores this itself -- never put a real secret
-      # value directly in this file.
-      - key: SESSION_SECRET
-        generateValue: true
-      # sync: false = set manually in the Render dashboard after the
-      # Blueprint is created (the Neon connection string), never written
-      # here or synced from this file.
-      - key: DATABASE_URL
-        sync: false
+# The road-inventory-enhancements service is created and managed manually in
+# the Render dashboard instead of through this Blueprint -- see the incident
+# this avoided: syncing a Blueprint that defines a second service here, from
+# the enhancements branch, offered to also repoint the service above (matched
+# by name) onto that same branch. Keeping only one service in this file
+# removes that risk entirely, not just for this file's current contents but
+# for any future edit to it.
