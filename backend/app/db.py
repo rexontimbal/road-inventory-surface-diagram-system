@@ -1,14 +1,11 @@
 import os
-from pathlib import Path
 
-from dotenv import load_dotenv
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-BACKEND_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BACKEND_DIR / ".env")
+from app import config  # noqa: F401 -- loads backend/.env before the os.environ read below
 
-DATA_DIR = BACKEND_DIR / "data"
+DATA_DIR = config.BACKEND_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
 

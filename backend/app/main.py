@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -5,11 +6,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse
 
+from app import config  # noqa: F401 -- loads backend/.env before the os.environ reads below (this app, db, auth)
 from app.db import Base, engine, ensure_schema
 from app.routers import auth, backup, roads
 
 Base.metadata.create_all(bind=engine)
 ensure_schema()
+
+GOOGLE_CLIENT_ID_CONFIGURED = bool(os.environ.get("GOOGLE_CLIENT_ID"))
+SESSION_SECRET_CONFIGURED = bool(os.environ.get("SESSION_SECRET"))
+# Values are never logged -- only whether each var is present, so this is
+# safe to leave in production logs.
+print(f"GOOGLE_CLIENT_ID configured: {'yes' if GOOGLE_CLIENT_ID_CONFIGURED else 'no'}")
+print(f"SESSION_SECRET configured: {'yes' if SESSION_SECRET_CONFIGURED else 'no'}")
 
 app = FastAPI(title="Road Inventory & Surface Diagram System")
 
@@ -33,7 +42,7 @@ app.include_router(auth.router)
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "auth_configured": GOOGLE_CLIENT_ID_CONFIGURED}
 
 
 # Serve the built React app (frontend/dist) when present, so the whole

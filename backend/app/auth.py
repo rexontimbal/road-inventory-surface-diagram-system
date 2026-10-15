@@ -7,6 +7,8 @@ from fastapi import Request
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 
+from app import config  # noqa: F401 -- loads backend/.env before the os.environ reads below
+
 SESSION_COOKIE_NAME = "session"
 SESSION_TTL_SECONDS = 7 * 24 * 60 * 60  # 7 days
 JWT_ALGORITHM = "HS256"
