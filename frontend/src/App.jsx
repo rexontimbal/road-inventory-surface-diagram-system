@@ -6,7 +6,7 @@ import UploadPanel from './components/sidebar/UploadPanel'
 import SectionSelectPanel from './components/sidebar/SectionSelectPanel'
 import DiagramSettingsPanel from './components/sidebar/DiagramSettingsPanel'
 import RoadInventoryTable from './components/inventory/RoadInventoryTable'
-import NetworkSummaryBar from './components/inventory/NetworkSummaryBar'
+import NetworkBreakdownModal from './components/inventory/NetworkBreakdownModal'
 import DiagramPanel from './components/diagram/DiagramPanel'
 import {
   deleteRoad,
@@ -23,7 +23,6 @@ import { showToast } from './components/common/DialogProvider'
 import './App.css'
 
 const PAGE_SIZE = 10
-const NETWORK_SUMMARY_OPEN_KEY = 'ris.networkSummaryOpen'
 
 const EMPTY_TABLE_FILTERS = { sectionId: '', district: '', classification: '', status: '', surfaceType: '' }
 
@@ -50,14 +49,6 @@ function buildClassifications(roads) {
   return [...set].sort((a, b) => a.localeCompare(b))
 }
 
-function readStoredNetworkSummaryOpen() {
-  try {
-    return localStorage.getItem(NETWORK_SUMMARY_OPEN_KEY) === 'true'
-  } catch {
-    return false
-  }
-}
-
 export default function App() {
   const [roads, setRoads] = useState([])
   const [selectedDistrict, setSelectedDistrict] = useState('')
@@ -79,7 +70,7 @@ export default function App() {
   // localStorage so it survives a refresh (road data itself persists in the
   // backend DB; this is just the descriptive file name/timestamp).
   const [uploadMeta, setUploadMeta] = useState(readUploadMeta)
-  const [networkSummaryOpen, setNetworkSummaryOpen] = useState(readStoredNetworkSummaryOpen)
+  const [networkBreakdownOpen, setNetworkBreakdownOpen] = useState(false)
   // authChecked gates the header's auth UI so it doesn't flash "signed out"
   // before the /api/auth/me check resolves.
   const [authUser, setAuthUser] = useState(null)
@@ -183,17 +174,6 @@ export default function App() {
     }
   }, [])
 
-  function toggleNetworkSummary() {
-    setNetworkSummaryOpen((prev) => {
-      const next = !prev
-      try {
-        localStorage.setItem(NETWORK_SUMMARY_OPEN_KEY, String(next))
-      } catch {
-        // localStorage unavailable (private mode, etc.) -- toggle still works for this session
-      }
-      return next
-    })
-  }
 
   useEffect(() => {
     document.title = selectedSectionId
@@ -456,8 +436,7 @@ export default function App() {
         ref={headerRef}
         summary={networkSummary}
         lastUploadAt={uploadMeta ? new Date(uploadMeta.uploadedAt) : null}
-        networkSummaryOpen={networkSummaryOpen}
-        onToggleNetworkSummary={toggleNetworkSummary}
+        onOpenNetworkBreakdown={() => setNetworkBreakdownOpen(true)}
         authUser={authUser}
         authChecked={authChecked}
         onGoogleCredential={handleGoogleCredential}
@@ -522,12 +501,6 @@ export default function App() {
           />
         </aside>
         <main className="content">
-          <NetworkSummaryBar
-            summary={networkSummary}
-            open={networkSummaryOpen}
-            onClose={() => networkSummaryOpen && toggleNetworkSummary()}
-            onSelectSection={handleSelectSection}
-          />
           <RoadInventoryTable
             segmentsPage={segmentsPage}
             onPageChange={setTablePage}
@@ -549,6 +522,17 @@ export default function App() {
           />
         </main>
       </div>
+      {networkBreakdownOpen && (
+        <NetworkBreakdownModal
+          summary={networkSummary}
+          roads={roads}
+          onClose={() => setNetworkBreakdownOpen(false)}
+          onSelectSection={(sectionId) => {
+            setNetworkBreakdownOpen(false)
+            handleSelectSection(sectionId)
+          }}
+        />
+      )}
     </div>
   )
 }

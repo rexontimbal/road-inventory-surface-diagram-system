@@ -75,8 +75,7 @@ const Header = forwardRef(function Header(
   {
     summary,
     lastUploadAt,
-    networkSummaryOpen,
-    onToggleNetworkSummary,
+    onOpenNetworkBreakdown,
     authUser,
     authChecked,
     onGoogleCredential,
@@ -157,11 +156,9 @@ const Header = forwardRef(function Header(
                 </span>
                 <button
                   type="button"
-                  className={`header-stat-chip header-stat-chip-good header-stat-chip-toggle${networkSummaryOpen ? ' header-stat-chip-toggle-open' : ''}`}
-                  onClick={onToggleNetworkSummary}
-                  aria-expanded={networkSummaryOpen}
-                  aria-controls="network-summary-panel"
-                  title={networkSummaryOpen ? 'Hide network breakdown' : 'Show network breakdown'}
+                  className="header-stat-chip header-stat-chip-good header-stat-chip-toggle"
+                  onClick={onOpenNetworkBreakdown}
+                  title="Show network breakdown"
                 >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <path d="m6 12 4 4 8-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
