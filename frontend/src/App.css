@@ -1458,14 +1458,31 @@ button:focus-visible {
 }
 
 /* Inventory table */
+/* Flex, not grid -- a grid's auto-placed items can land a lone trailing
+   item (Clear filters) in column 1 of its own new row while the row above
+   still has empty cells to its right, which read as a big gap floating
+   Clear filters off to the side. A flex-wrap row keeps strict DOM order:
+   Clear filters always immediately follows the last filter it's laid out
+   after, whichever row that ends up wrapping to. */
 .filter-bar {
   display: flex;
-  align-items: flex-end;
-  gap: 10px;
   flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
   margin-bottom: 12px;
   padding-bottom: 10px;
   border-bottom: 1px solid var(--border);
+}
+.filter-bar .filter-field {
+  flex: 1 1 160px;
+  /* Flex items default to min-width:auto, which resolves to their content's
+     min-content size -- a long Section label ("S00392MN -- Nasipit Port
+     Rd...") was clamping that field's hypothetical width well past its
+     160px basis during line-breaking, eating the row's remaining slack and
+     pushing Clear filters onto its own orphaned line even though the basis
+     math alone left room for it. min-width:0 lets ellipsis/overflow:hidden
+     actually govern the true minimum, like it's meant to. */
+  min-width: 0;
 }
 /* Scoped as ".filter-bar .filter-field" (two classes) rather than bare
    ".filter-field" (one class) so this reliably outranks the sidebar's global
@@ -1487,6 +1504,7 @@ button:focus-visible {
 .filter-bar .filter-field select,
 .filter-bar .filter-field .custom-select-sm {
   box-sizing: border-box;
+  width: 100%;
   height: 32px;
   padding: 4px 28px 4px 10px;
   border: 1px solid var(--border-strong);
@@ -1500,26 +1518,6 @@ button:focus-visible {
   white-space: nowrap;
   overflow: hidden;
 }
-.filter-field-district select,
-.filter-field-district .custom-select-sm {
-  width: 190px;
-}
-.filter-field-section select,
-.filter-field-section .custom-select-sm {
-  width: 200px;
-}
-.filter-field-narrow select,
-.filter-field-narrow .custom-select-sm {
-  width: 150px;
-}
-.filter-field-surface select,
-.filter-field-surface .custom-select-sm {
-  width: 160px;
-}
-.filter-field-lanes select,
-.filter-field-lanes .custom-select-sm {
-  width: 110px;
-}
 .filter-bar .filter-field select:focus {
   outline: none;
   border-color: var(--accent);
@@ -1531,13 +1529,11 @@ button:focus-visible {
    same center line as the dropdown text, instead of bottom-aligning a short
    label-less link against a taller labeled dropdown column. */
 .filter-bar .filter-action {
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 4px;
   margin-bottom: 0;
-}
-.filter-action-right {
-  margin-left: auto;
 }
 .filter-label-spacer {
   font-size: 11px;
@@ -1561,7 +1557,7 @@ button:focus-visible {
   border-color: transparent;
   color: var(--accent-hover);
 }
-.filter-bar .export-csv-btn {
+.export-csv-btn {
   height: 32px;
   display: inline-flex;
   align-items: center;
@@ -1571,16 +1567,101 @@ button:focus-visible {
   padding: 0 4px;
   color: var(--accent);
   text-decoration: none;
+  font-size: 13px;
+  white-space: nowrap;
 }
-.filter-bar .export-csv-btn:hover {
+.export-csv-btn:hover {
   background: none;
   color: var(--accent-hover);
   text-decoration: underline;
 }
-.filter-bar .export-csv-btn:focus-visible {
+.export-csv-btn:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35);
   border-radius: var(--radius-sm);
+}
+
+/* "4. Road Inventory Data" header row -- records count + Export CSV sit
+   beside the title instead of the old separate "Page X of Y" line, which
+   duplicated what Pagination already shows below the table. */
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* "More filters" toggle (Classification/Status/Lanes) -- hidden entirely
+   above ~1100px where the grid has room to show every filter at once; see
+   the min-width:1101px block below .filter-bar's responsive rules. */
+.filter-more-toggle {
+  display: none;
+  align-self: end;
+  height: 32px;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.filter-more-toggle:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+.filter-more-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+.filter-more-chevron {
+  color: currentColor;
+  transition: transform 0.2s ease;
+}
+.filter-more-chevron-open {
+  transform: rotate(180deg);
+}
+@media (min-width: 1101px) {
+  .filter-more-fields {
+    display: contents;
+  }
+}
+@media (max-width: 1100px) {
+  .filter-more-toggle {
+    display: inline-flex;
+  }
+  /* flex-basis:100% forces this onto its own line in the flex-wrap row
+     (the grid's "grid-column: 1 / -1" full-width trick has no flex
+     equivalent property -- a full-width flex-basis is it). */
+  .filter-more-fields {
+    flex: 1 1 100%;
+    display: grid;
+    grid-template-rows: 0fr;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 0 10px;
+    transition: grid-template-rows 0.22s ease;
+  }
+  .filter-more-fields > * {
+    min-height: 0;
+    overflow: hidden;
+  }
+  .filter-more-fields-open {
+    grid-template-rows: 1fr;
+    gap: 10px;
+  }
 }
 .sortable-th {
   user-select: none;
@@ -1694,28 +1775,29 @@ td {
 .inventory-table table td:nth-child(3) {
   text-align: left;
 }
-/* Floors only for the columns an edit control could otherwise widen --
-   Number of Lanes (a 56px-max number input) and the three surface/shoulder
-   CustomSelect triggers. Under auto layout this just raises that column's
-   minimum; it doesn't cap anything, so a wider header label still wins if
-   it needs more. Position-coupled to the COLUMNS array order in
-   RoadInventoryTable.jsx (# / Section ID / Road Name / Start / End / Length
-   (m) / Lanes / Surface / Left / Right / Status / actions) -- keep both in
-   sync if columns are reordered. */
 .inventory-table table th:nth-child(6),
 .inventory-table table td:nth-child(6) {
   min-width: 90px;
 }
-.inventory-table table th:nth-child(7),
-.inventory-table table td:nth-child(7) {
+/* Floors only for the columns an edit control could otherwise widen --
+   Number of Lanes (a 56px-max number input) and the three surface/shoulder
+   CustomSelect triggers -- and only ON the row actually being edited.
+   Table auto-layout still sizes the whole column from this one row's floor
+   while editing (which is the point: keeps the widget from clipping), but
+   with no row mid-edit the column shrinks back to its real text content
+   ("asphalt", "concrete", ...) instead of permanently reserving edit-widget
+   width on every row -- that reserved-but-unused width was pushing the
+   table a few px past the card and forcing a horizontal scrollbar even
+   when every visible column already fit. Position-coupled to the COLUMNS
+   array order in RoadInventoryTable.jsx (# / Section ID / Road Name /
+   Start / End / Length (m) / Lanes / Surface / Left / Right / Status /
+   actions) -- keep both in sync if columns are reordered. */
+.inventory-table .editing-row td:nth-child(7) {
   min-width: 76px;
 }
-.inventory-table table th:nth-child(8),
-.inventory-table table td:nth-child(8),
-.inventory-table table th:nth-child(9),
-.inventory-table table td:nth-child(9),
-.inventory-table table th:nth-child(10),
-.inventory-table table td:nth-child(10) {
+.inventory-table .editing-row td:nth-child(8),
+.inventory-table .editing-row td:nth-child(9),
+.inventory-table .editing-row td:nth-child(10) {
   min-width: 128px;
 }
 /* Status badge ("✕ Incomplete") is the one column directly beside the
@@ -1999,19 +2081,35 @@ tbody tr:hover .row-edit-btn,
    segments" line stacked above when a filter is narrowing the table. */
 .table-summary-bar {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 12px;
+  flex-direction: column;
+  gap: 6px;
   margin-bottom: 12px;
 }
+.table-summary-bar-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
 .table-summary-filtered-line {
-  flex-basis: 100%;
   font-size: 0.74rem;
   color: var(--text-muted);
 }
-.table-summary-bar-track {
-  flex: 1;
-  min-width: 120px;
+.table-summary-bar-line .completion-label {
+  margin-left: auto;
+}
+/* Two classes (not one) so this reliably outranks .completion-bar's own
+   "flex: 1; height: 10px" below regardless of source order. .completion-bar
+   was written for its usual row-flex parent (.completion-summary); inside
+   THIS bar's column-flex parent (.table-summary-bar) that same "flex: 1"
+   sets flex-basis to 0% on the main axis, which here is height -- collapsing
+   the whole track to 0px no matter what height is set. "flex: none" opts
+   back into sizing from width/height normally. */
+.completion-bar.table-summary-bar-track {
+  flex: none;
+  width: 100%;
+  height: 8px;
 }
 .completion-bar {
   flex: 1;

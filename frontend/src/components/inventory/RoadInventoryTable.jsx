@@ -138,6 +138,14 @@ export default function RoadInventoryTable({
   const [saving, setSaving] = useState(false)
   const [tableScrolledOver, setTableScrolledOver] = useState(false)
   const [filteredSummary, setFilteredSummary] = useState(null)
+  const [moreFiltersOpen, setMoreFiltersOpen] = useState(false)
+
+  // Classification/Status/Lanes collapse into "More filters" below ~1100px
+  // (see .filter-more-fields in App.css) -- this count badges the toggle so
+  // a filter set from a narrow screen stays visible even when collapsed.
+  const hiddenActiveFilterCount = [filters.classification, filters.status, filters.numLanes].filter(
+    Boolean
+  ).length
 
   // Totals for the CURRENT filters, across all matching rows (not just the
   // visible page) -- backend-aggregated so this stays fast at 11k+ rows.
@@ -387,6 +395,14 @@ export default function RoadInventoryTable({
     return (meters / 1000).toFixed(1)
   }
 
+  // Sub-10m segments round to a whole number of meters away to "0" (e.g.
+  // K1256 + 290 -> K1256 + 290.40 is a real 0.4m segment) -- one decimal
+  // below 10m keeps non-zero lengths visibly non-zero without cluttering
+  // the far more common >=10m rows with decimals.
+  function formatLengthM(meters) {
+    return meters < 10 ? meters.toFixed(1) : Math.round(meters).toLocaleString()
+  }
+
   // Builds the summary bar's {pct, text} -- network totals (already fetched
   // by the header) when no filter is active, otherwise the backend-
   // aggregated filtered totals once they've loaded.
@@ -426,11 +442,21 @@ export default function RoadInventoryTable({
     <div className="panel inventory-table">
       <div className="panel-header-row">
         <h2>4. Road Inventory Data</h2>
-        {segmentsPage && (
-          <span className="page-summary">
-            Page {segmentsPage.page} of {segmentsPage.total_pages} ({segmentsPage.total_records} records)
-          </span>
-        )}
+        <div className="panel-header-actions">
+          {segmentsPage && (
+            <span className="page-summary">{segmentsPage.total_records} records</span>
+          )}
+          <a
+            className="btn-compact export-csv-btn"
+            href={getSegmentsExportUrl(filters, sort)}
+            download
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 16V4m0 12-4-4m4 4 4-4M4 18v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Export CSV
+          </a>
+        </div>
       </div>
 
       <div className="filter-bar">
@@ -488,36 +514,6 @@ export default function RoadInventoryTable({
             }
           />
         </div>
-        <div className="filter-field filter-field-narrow">
-          <span>Classification</span>
-          <CustomSelect
-            size="sm"
-            value={filters.classification}
-            onChange={(v) => updateFilter('classification', v)}
-            options={classificationOptions}
-            ariaLabel="Filter by classification"
-          />
-        </div>
-        <div className="filter-field filter-field-narrow">
-          <span>Status</span>
-          <CustomSelect
-            size="sm"
-            value={filters.status}
-            onChange={(v) => updateFilter('status', v)}
-            options={STATUS_OPTIONS}
-            ariaLabel="Filter by status"
-            renderOption={(o) =>
-              o.value === '' ? (
-                o.label
-              ) : (
-                <span className={`status-badge ${o.value === 'Complete' ? 'status-badge-good' : 'status-badge-critical'}`}>
-                  <span aria-hidden="true">{o.value === 'Complete' ? '✓' : '✕'}</span>
-                  {o.label}
-                </span>
-              )
-            }
-          />
-        </div>
         <div className="filter-field filter-field-surface">
           <span>Surface Type</span>
           <CustomSelect
@@ -529,17 +525,70 @@ export default function RoadInventoryTable({
             renderOption={(o) => (o.value === '' ? o.label : renderSurfaceOption(o))}
           />
         </div>
-        <div className="filter-field filter-field-lanes">
-          <span>Number of Lanes</span>
-          <CustomSelect
-            size="sm"
-            value={filters.numLanes}
-            onChange={(v) => updateFilter('numLanes', v)}
-            options={laneOptions}
-            ariaLabel="Filter by number of lanes"
-            disabled={laneCounts.length === 0}
-          />
+
+        <button
+          type="button"
+          className="filter-more-toggle"
+          onClick={() => setMoreFiltersOpen((o) => !o)}
+          aria-expanded={moreFiltersOpen}
+        >
+          More filters
+          {hiddenActiveFilterCount > 0 && <span className="filter-more-badge">{hiddenActiveFilterCount}</span>}
+          <svg
+            className={`filter-more-chevron${moreFiltersOpen ? ' filter-more-chevron-open' : ''}`}
+            width="10"
+            height="10"
+            viewBox="0 0 10 10"
+            aria-hidden="true"
+          >
+            <path d="M2 3.5 5 7l3-3.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+
+        <div className={`filter-more-fields${moreFiltersOpen ? ' filter-more-fields-open' : ''}`}>
+          <div className="filter-field filter-field-narrow">
+            <span>Classification</span>
+            <CustomSelect
+              size="sm"
+              value={filters.classification}
+              onChange={(v) => updateFilter('classification', v)}
+              options={classificationOptions}
+              ariaLabel="Filter by classification"
+            />
+          </div>
+          <div className="filter-field filter-field-narrow">
+            <span>Status</span>
+            <CustomSelect
+              size="sm"
+              value={filters.status}
+              onChange={(v) => updateFilter('status', v)}
+              options={STATUS_OPTIONS}
+              ariaLabel="Filter by status"
+              renderOption={(o) =>
+                o.value === '' ? (
+                  o.label
+                ) : (
+                  <span className={`status-badge ${o.value === 'Complete' ? 'status-badge-good' : 'status-badge-critical'}`}>
+                    <span aria-hidden="true">{o.value === 'Complete' ? '✓' : '✕'}</span>
+                    {o.label}
+                  </span>
+                )
+              }
+            />
+          </div>
+          <div className="filter-field filter-field-lanes">
+            <span>Number of Lanes</span>
+            <CustomSelect
+              size="sm"
+              value={filters.numLanes}
+              onChange={(v) => updateFilter('numLanes', v)}
+              options={laneOptions}
+              ariaLabel="Filter by number of lanes"
+              disabled={laneCounts.length === 0}
+            />
+          </div>
         </div>
+
         {hasActiveFilters && (
           <div className="filter-action">
             <span className="filter-label-spacer">&nbsp;</span>
@@ -548,28 +597,19 @@ export default function RoadInventoryTable({
             </button>
           </div>
         )}
-        <div className="filter-action filter-action-right">
-          <span className="filter-label-spacer">&nbsp;</span>
-          <a
-            className="btn-compact export-csv-btn"
-            href={getSegmentsExportUrl(filters, sort)}
-            download
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M12 16V4m0 12-4-4m4 4 4-4M4 18v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            Export CSV
-          </a>
-        </div>
       </div>
 
       {summaryDisplay && (
         <div className="table-summary-bar">
-          {summaryDisplay.filteredLine && <span className="table-summary-filtered-line">{summaryDisplay.filteredLine}</span>}
+          <div className="table-summary-bar-line">
+            {summaryDisplay.filteredLine && (
+              <span className="table-summary-filtered-line">{summaryDisplay.filteredLine}</span>
+            )}
+            <span className="completion-label">{summaryDisplay.text}</span>
+          </div>
           <div className="completion-bar table-summary-bar-track">
             <div className="completion-bar-fill" style={{ width: `${summaryDisplay.pct}%` }} />
           </div>
-          <span className="completion-label">{summaryDisplay.text}</span>
         </div>
       )}
 
@@ -629,10 +669,10 @@ export default function RoadInventoryTable({
                   <td>
                     {r.irregular_km_post ? (
                       <span className="length-cell-irregular">
-                        <IrregularIcon />0
+                        <IrregularIcon />
                       </span>
                     ) : (
-                      Math.round(r.length_m).toLocaleString()
+                      formatLengthM(r.length_m)
                     )}
                   </td>
                   <td>
