@@ -4,6 +4,7 @@ import Legend from './Legend'
 import { useModalLayer } from '../common/useModalLayer'
 import { useDevicePixelRatio } from '../../utils/useDevicePixelRatio'
 import { renderDiagram, getCanvasLogicalSize } from './diagramRenderer'
+import ProgressBar from '../common/ProgressBar'
 
 const ZOOM_MIN = 0.25
 const ZOOM_MAX = 3
@@ -290,9 +291,7 @@ export default function DiagramFullscreen({ road, completion, onClose, onPrint, 
           </div>
           {completion && (
             <div className="fullscreen-completion">
-              <div className="completion-bar fullscreen-completion-bar">
-                <div className="completion-bar-fill" style={{ width: `${completion.pct}%` }} />
-              </div>
+              <ProgressBar pct={completion.pct} className="fullscreen-completion-bar" />
               <span className="completion-label">
                 {completion.pct}% Asphalted ({(completion.doneM / 1000).toFixed(1)} km of{' '}
                 {(completion.totalM / 1000).toFixed(1)} km)

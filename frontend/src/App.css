@@ -2099,31 +2099,55 @@ tbody tr:hover .row-edit-btn,
 .table-summary-bar-line .completion-label {
   margin-left: auto;
 }
-/* Two classes (not one) so this reliably outranks .completion-bar's own
-   "flex: 1; height: 10px" below regardless of source order. .completion-bar
-   was written for its usual row-flex parent (.completion-summary); inside
-   THIS bar's column-flex parent (.table-summary-bar) that same "flex: 1"
-   sets flex-basis to 0% on the main axis, which here is height -- collapsing
-   the whole track to 0px no matter what height is set. "flex: none" opts
-   back into sizing from width/height normally. */
-.completion-bar.table-summary-bar-track {
-  flex: none;
+.table-summary-bar-track {
   width: 100%;
-  height: 8px;
 }
-.completion-bar {
-  flex: 1;
-  height: 10px;
+
+/* ProgressBar (components/common/ProgressBar.jsx) -- the one shared "%
+   complete" bar used by the diagram panel, diagram fullscreen, the table's
+   filtered-totals bar, and the Network Breakdown modal (overall + each
+   District's mini bar). Deliberately carries NO "flex" property of its own:
+   an earlier version reused .completion-bar's "flex: 1", which is only
+   safe in a ROW-flex parent (there, flex-basis:0% affects width); inside a
+   COLUMN-flex parent that same rule zeroes the main axis, which is height,
+   collapsing the bar to 0px no matter what height was requested -- that
+   bug hit the table summary bar once already and the Network Breakdown
+   modal's overall bar the same way. Leaving flex unset sidesteps the whole
+   category: callers that need the bar to grow across a row (the diagram
+   panel) opt in explicitly via .progress-bar-grow instead. The fill is
+   always a <div> (block), never a <span> (inline) -- inline elements
+   ignore `height` outright, which is what silently flattened the District
+   mini bars to an invisible 0px-tall fill even though their width/pct was
+   already correct. */
+.progress-bar {
   border-radius: 999px;
   background: var(--critical-soft);
   overflow: hidden;
   border: 1px solid var(--border);
 }
-.completion-bar-fill {
+.progress-bar-fill {
+  display: block;
   height: 100%;
   background: var(--good);
   border-radius: 999px;
   transition: width 0.3s ease;
+}
+/* Tiered fill colors (ProgressBar's `tiered` prop) -- match the Network
+   Breakdown modal's section-chip tiers exactly (network-chip-low/mid/
+   complete) so a District's mini bar and its sections' chips never
+   disagree on what "mostly done" looks like. */
+.progress-bar-fill-low {
+  background: var(--critical);
+}
+.progress-bar-fill-mid {
+  background: var(--warning);
+}
+.progress-bar-fill-complete {
+  background: var(--good);
+}
+.progress-bar-grow {
+  flex: 1;
+  min-width: 0;
 }
 .completion-label {
   font-size: 0.78rem;
@@ -2775,8 +2799,8 @@ tbody tr:hover .row-edit-btn,
 }
 /* The bar fills from 0 over 500ms when the modal opens -- longer and scoped
    separately from the diagram panel's own 0.3s completion bar, which shares
-   the base .completion-bar-fill class. */
-.network-modal-progress .completion-bar-fill {
+   the base .progress-bar-fill class. */
+.network-modal-progress .progress-bar-fill {
   transition: width 500ms ease-out;
 }
 
@@ -2795,19 +2819,34 @@ tbody tr:hover .row-edit-btn,
   width: 200px;
   flex-shrink: 0;
 }
+/* Trailing link in the toolbar row (not its own full-width row/button
+   above the list) -- .history-search-wrap's flex:1 already pushes this to
+   the far right; flex-shrink:0 keeps it from being squeezed when the row
+   wraps on a narrow modal width. */
 .network-expand-all {
-  margin: 0 0 10px;
+  flex-shrink: 0;
+  margin: 0;
   font-size: 12.5px;
   color: var(--accent);
   background: none;
   border: none;
-  padding: 0;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
 }
 .network-expand-all:hover {
   text-decoration: underline;
   background: none;
   border-color: transparent;
   color: var(--accent-hover);
+}
+/* Focus ring only for keyboard users -- a mouse click on this link
+   shouldn't leave a visible outline behind. */
+.network-expand-all:focus {
+  outline: none;
+}
+.network-expand-all:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35);
 }
 
 /* The ONE scroll area in this modal -- groups expand/collapse within it,
@@ -2878,18 +2917,14 @@ tbody tr:hover .row-edit-btn,
   color: var(--text-secondary);
   white-space: nowrap;
 }
+/* Sizing only -- color/fill/tier come from the shared .progress-bar /
+   .progress-bar-fill classes (see the ProgressBar component). No border
+   here, unlike the bigger bars elsewhere: at 6px tall a 1px border reads as
+   too heavy for a chip-sized indicator. */
 .network-group-bar {
   width: 70px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--critical-soft);
-  overflow: hidden;
+  border: none;
   flex-shrink: 0;
-}
-.network-group-bar-fill {
-  height: 100%;
-  background: var(--good);
-  border-radius: 999px;
 }
 .network-group-chevron {
   flex-shrink: 0;

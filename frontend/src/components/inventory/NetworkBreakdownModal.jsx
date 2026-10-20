@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import CustomSelect from '../common/CustomSelect'
+import ProgressBar from '../common/ProgressBar'
 import { useModalLayer } from '../common/useModalLayer'
 import { getFullscreenPortalRoot } from '../../utils/fullscreenPortal'
 
@@ -221,9 +222,7 @@ export default function NetworkBreakdownModal({ summary, roads, onClose, onSelec
           {summary.pct}% asphalted · {asphaltKm} km of {totalKm} km · {totalSections} section
           {totalSections !== 1 ? 's' : ''}
         </p>
-        <div className="completion-bar network-modal-progress">
-          <div className="completion-bar-fill" style={{ width: `${summary.pct}%` }} />
-        </div>
+        <ProgressBar pct={summary.pct} height={8} className="network-modal-progress" />
 
         <div className="network-modal-toolbar">
           <div className="history-search-wrap">
@@ -257,13 +256,12 @@ export default function NetworkBreakdownModal({ summary, roads, onClose, onSelec
             ariaLabel="Sort"
             triggerClassName="network-sort-select"
           />
+          {groups.length > 0 && (
+            <button type="button" className="network-expand-all" onClick={allExpanded ? collapseAll : expandAll}>
+              {allExpanded ? 'Collapse all' : 'Expand all'}
+            </button>
+          )}
         </div>
-
-        {groups.length > 0 && (
-          <button type="button" className="network-expand-all" onClick={allExpanded ? collapseAll : expandAll}>
-            {allExpanded ? 'Collapse all' : 'Expand all'}
-          </button>
-        )}
 
         <div className="network-modal-body thin-scroll">
           {groups.length === 0 && <div className="network-empty">No sections match your search.</div>}
@@ -286,9 +284,7 @@ export default function NetworkBreakdownModal({ summary, roads, onClose, onSelec
                       {g.pct}% · {(g.total / 1000).toFixed(1)} km · {g.sections.length} section
                       {g.sections.length !== 1 ? 's' : ''}
                     </span>
-                    <span className="network-group-bar">
-                      <span className="network-group-bar-fill" style={{ width: `${g.pct}%` }} />
-                    </span>
+                    <ProgressBar pct={g.pct} height={6} tiered className="network-group-bar" />
                   </div>
                   <svg
                     className={`network-group-chevron${isOpen ? ' network-group-chevron-open' : ''}`}

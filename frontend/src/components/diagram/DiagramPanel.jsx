@@ -5,6 +5,7 @@ import Legend from './Legend'
 import DiagramFullscreen from './DiagramFullscreen'
 import { showToast } from '../common/DialogProvider'
 import { useDevicePixelRatio } from '../../utils/useDevicePixelRatio'
+import ProgressBar from '../common/ProgressBar'
 
 // Sums only the portion of each segment that falls inside `range` (if given)
 // so the completion % reflects just the selected station range, not the
@@ -271,9 +272,7 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
 
       {completion && (
         <div className="completion-summary no-print">
-          <div className="completion-bar">
-            <div className="completion-bar-fill" style={{ width: `${completion.pct}%` }} />
-          </div>
+          <ProgressBar pct={completion.pct} className="progress-bar-grow" />
           <span className="completion-label">
             {completion.pct}% Asphalted ({(completion.doneM / 1000).toFixed(1)} km of{' '}
             {(completion.totalM / 1000).toFixed(1)} km)

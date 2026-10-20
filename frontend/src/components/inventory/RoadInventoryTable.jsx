@@ -4,6 +4,7 @@ import CustomSelect from '../common/CustomSelect'
 import { editSegment, fetchFilteredSegmentsSummary, getSegmentsExportUrl } from '../../api/roads'
 import { SHOULDER_SWATCHES, SURFACE_SWATCHES } from '../../utils/surfaceSwatches'
 import { showToast } from '../common/DialogProvider'
+import ProgressBar from '../common/ProgressBar'
 
 // Matches .app-header-spacer in App.css (the fixed app header's height).
 const APP_HEADER_HEIGHT = 72
@@ -607,9 +608,7 @@ export default function RoadInventoryTable({
             )}
             <span className="completion-label">{summaryDisplay.text}</span>
           </div>
-          <div className="completion-bar table-summary-bar-track">
-            <div className="completion-bar-fill" style={{ width: `${summaryDisplay.pct}%` }} />
-          </div>
+          <ProgressBar pct={summaryDisplay.pct} height={8} className="table-summary-bar-track" />
         </div>
       )}
 
