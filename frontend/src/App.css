@@ -2181,6 +2181,9 @@ tbody tr:hover .row-edit-btn,
 .tooltip-not-done {
   color: var(--critical);
 }
+.tooltip-nodata {
+  color: var(--text-muted);
+}
 .tooltip-row {
   display: flex;
   justify-content: space-between;

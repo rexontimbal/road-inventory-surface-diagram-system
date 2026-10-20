@@ -353,7 +353,20 @@ export default function DiagramFullscreen({ road, completion, onClose, onPrint, 
         </div>
       </div>
 
-      {tooltip && (
+      {tooltip && tooltip.segment.isNoData && (
+        <div className="diagram-tooltip no-print" style={tooltipStyle(tooltip)}>
+          <div className="tooltip-status tooltip-nodata">No data</div>
+          <div className="tooltip-row">
+            <span>Station</span>
+            <span>{tooltip.segment.start_station} &ndash; {tooltip.segment.end_station}</span>
+          </div>
+          <div className="tooltip-row">
+            <span>Length</span>
+            <span>{Math.round(tooltip.segment.length_m).toLocaleString()} m</span>
+          </div>
+        </div>
+      )}
+      {tooltip && !tooltip.segment.isNoData && (
         <div className="diagram-tooltip no-print" style={tooltipStyle(tooltip)}>
           <div className={`tooltip-status ${tooltip.isDone ? 'tooltip-done' : 'tooltip-not-done'}`}>
             {tooltip.isDone ? '✓ Asphalted' : '✕ Not yet asphalted'}

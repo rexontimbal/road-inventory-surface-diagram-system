@@ -35,21 +35,39 @@ const SHOULDER_H = 22
 const LANE_H = 22
 const STRIP_GAP = 44
 const BORDER_COLOR = '#333333'
-// Block boundaries (where two adjacent drawn blocks actually differ in
-// lanes/surface/shoulders, or a gap/overlap keeps them unmerged) are thin
-// and light rather than BORDER_COLOR's heavy dark -- with same-attribute
-// runs now merged into one wider block (see mergeSegmentsForDiagram above),
-// the remaining boundaries are real "something changed here" markers, not
-// every tiny segment's own box, so they don't need to shout.
-const BLOCK_BOUNDARY_COLOR = '#cbd5e1'
 // A block clipped to less than this many px (a short, unmerged -- different
 // attributes or a gap/overlap neighbor -- segment at the current zoom) still
 // renders at this minimum width rather than vanishing or anti-aliasing into
 // a near-invisible sliver. Blocks are drawn left-to-right, so a later block
 // painting over a widened earlier one's bled-over edge is what keeps this
 // from visibly overlapping; the tooltip hit region always uses the real
-// (unwidened) data, just the fill/stroke width is floored.
+// (unwidened) data, just the fill width is floored.
 const MIN_BLOCK_WIDTH_PX = 2
+// Every block's fill is drawn this many px wider than its own [x, xEnd) --
+// extending only to the right, where the next block (drawn after, in strip
+// order) paints over the extra sliver. Two independently-rounded fillRect
+// calls that are mathematically edge-to-edge can still leave a hairline
+// gap once the canvas's own backing-store scale (devicePixelRatio, which is
+// fractional on most real displays -- 1.25x/1.5x are both common) isn't a
+// whole number: each rect's edge anti-aliases against the fractional device
+// pixel it lands on independently, and the two antialiased edges don't
+// always sum to full coverage. Overlapping forward removes the seam
+// regardless of scale, since whichever block draws last always wins.
+const SEAM_OVERLAP_PX = 1
+// A real gap in the station data (not just a rounding artifact) narrower
+// than this, in meters OR current on-screen pixels, reads as visual noise
+// rather than a meaningful missing stretch -- it's closed by extending the
+// previous block's fill to the next block's start. The underlying data and
+// that block's tooltip are untouched; only the drawn rectangle widens.
+const GAP_CLOSE_THRESHOLD_M = 50
+const GAP_CLOSE_THRESHOLD_PX = 3
+// A gap that isn't closed (see above) is drawn as its own flat, hatched
+// "no data" block instead of leaving the white canvas background showing
+// through -- that bare white was indistinguishable from the seam artifact
+// this whole fix removes, so a real missing-data gap needs its own
+// deliberately-different look.
+const NODATA_BG = '#E3E6EA'
+const NODATA_HATCH = '#B7BEC7'
 const MARKING_COLOR = 'rgba(255,255,255,0.75)'
 const ARROW_SPACING_PX = 70
 const MARKED_SURFACES = new Set(['asphalt', 'concrete']) // surfaces with painted lane markings
@@ -419,24 +437,73 @@ function drawStrip(ctx, cfg) {
     }
   }
 
-  // Clip segments into this strip and draw each clipped column
+  // Clip segments into this strip, then walk consecutive pairs to decide
+  // what (if anything) fills the space between them: nothing for a
+  // contiguous/overlapping pair, an extended previous block for a small
+  // real gap, or a dedicated "no data" block for a larger one. This runs
+  // as its own pass (building `blocks` first) rather than drawing inline,
+  // because closing a small gap means retroactively widening the PREVIOUS
+  // block already added to the list.
+  const blocks = []
   for (const seg of segments) {
     const clippedStart = Math.max(seg.start_m, stripStartM)
     const clippedEnd = Math.min(seg.end_m, stripEndM)
     if (clippedEnd <= clippedStart) continue
 
-    const x = px(x0 + (clippedStart - stripStartM) * pxPerMeter)
-    const xEnd = px(x0 + (clippedEnd - stripStartM) * pxPerMeter)
+    const prev = blocks[blocks.length - 1]
+    if (prev) {
+      const gapM = clippedStart - prev.endM
+      if (gapM > MERGE_EPSILON_M) {
+        const gapPx = gapM * pxPerMeter
+        if (gapM < GAP_CLOSE_THRESHOLD_M || gapPx < GAP_CLOSE_THRESHOLD_PX) {
+          // Visual only -- the data/tooltip for `prev.seg` is untouched,
+          // only the rectangle drawn for it widens to meet this segment.
+          prev.endM = clippedStart
+        } else {
+          blocks.push({ seg: null, startM: prev.endM, endM: clippedStart })
+        }
+      }
+    }
+    blocks.push({ seg, startM: clippedStart, endM: clippedEnd })
+  }
+
+  for (const block of blocks) {
+    const x = px(x0 + (block.startM - stripStartM) * pxPerMeter)
+    const xEnd = px(x0 + (block.endM - stripStartM) * pxPerMeter)
     const w = Math.max(xEnd - x, MIN_BLOCK_WIDTH_PX)
+    // Fills only (never hit regions) overshoot to the right -- see
+    // SEAM_OVERLAP_PX above.
+    const fillW = w + SEAM_OVERLAP_PX
+    const columnH = STATUS_STRIP_H + SHOULDER_H + laneBandH + SHOULDER_H
+
+    if (!block.seg) {
+      drawNoDataFill(ctx, x, statusStripY, fillW, columnH)
+      hitRegions.push({
+        x,
+        y: statusStripY,
+        w,
+        h: columnH,
+        segment: {
+          isNoData: true,
+          start_station: labelFn(block.startM),
+          end_station: labelFn(block.endM),
+          length_m: block.endM - block.startM,
+        },
+        isDone: false,
+      })
+      continue
+    }
+
+    const seg = block.seg
 
     // Done/not-done status strip -- independent of the surface-type legend
     // colors, so progress reads at a glance without reinterpreting materials.
     const isDone = seg.surface_type === 'asphalt'
     ctx.fillStyle = isDone ? STATUS_DONE_COLOR : STATUS_NOT_DONE_COLOR
-    ctx.fillRect(x, statusStripY, w, STATUS_STRIP_H)
+    ctx.fillRect(x, statusStripY, fillW, STATUS_STRIP_H)
 
     // Top shoulder
-    paintCell(ctx, x, topShoulderY, w, SHOULDER_H, seg.shoulder_right, scale)
+    paintCell(ctx, x, topShoulderY, fillW, SHOULDER_H, seg.shoulder_right, scale)
     if (MARKED_SURFACES.has(seg.shoulder_right)) {
       drawRumbleStrip(ctx, x, w, topShoulderY + SHOULDER_H, 'down')
     }
@@ -445,40 +512,57 @@ function drawStrip(ctx, cfg) {
     const offset = Math.floor((globalMaxLanes - seg.num_lanes) / 2)
     for (let li = 0; li < seg.num_lanes; li++) {
       const y = laneBandTop + (offset + li) * LANE_H
-      paintCell(ctx, x, y, w, LANE_H, seg.surface_type, scale)
+      paintCell(ctx, x, y, fillW, LANE_H, seg.surface_type, scale)
     }
 
     // Bottom shoulder
     const bottomShoulderY = laneBandTop + laneBandH
-    paintCell(ctx, x, bottomShoulderY, w, SHOULDER_H, seg.shoulder_left, scale)
+    paintCell(ctx, x, bottomShoulderY, fillW, SHOULDER_H, seg.shoulder_left, scale)
     if (MARKED_SURFACES.has(seg.shoulder_left)) {
       drawRumbleStrip(ctx, x, w, bottomShoulderY, 'up')
     }
 
     if (MARKED_SURFACES.has(seg.surface_type)) {
+      // lineDashOffset anchors the dash pattern to the strip's absolute x
+      // origin (not each block's own local x) -- without it, two adjacent
+      // but separately-drawn blocks each restart their dash cycle at their
+      // own left edge, which reads as a visible break in the line even
+      // though the lane markings are logically continuous across them.
       drawLaneMarkings(ctx, { x, w, laneBandTop, offset, numLanes: seg.num_lanes })
     }
-
-    // Outer border around the full column (shoulder-to-shoulder) -- marks a
-    // real block boundary (different attributes, or a gap/overlap that
-    // blocked merging), so it's the thin light BLOCK_BOUNDARY_COLOR, not
-    // BORDER_COLOR's dark. Offset by 0.5px so this 1px-wide stroke's
-    // centerline lands on a pixel boundary instead of straddling one (which
-    // is what makes a 1px canvas line render as a soft 2px blur) -- the
-    // fills above keep their exact boundaries; only the stroke itself is inset.
-    ctx.strokeStyle = BLOCK_BOUNDARY_COLOR
-    ctx.lineWidth = 1
-    ctx.strokeRect(x + 0.5, topShoulderY + 0.5, w - 1, SHOULDER_H + laneBandH + SHOULDER_H - 1)
 
     hitRegions.push({
       x,
       y: statusStripY,
       w,
-      h: STATUS_STRIP_H + SHOULDER_H + laneBandH + SHOULDER_H,
+      h: columnH,
       segment: seg,
       isDone,
     })
   }
+}
+
+// Flat, lightly hatched fill for a real (not visually-closed) gap in the
+// station data -- deliberately distinct from both the plain-white canvas
+// background and every real surface color/pattern, so it reads as "nothing
+// recorded here" rather than either a rendering seam or an actual surface.
+function drawNoDataFill(ctx, x, y, w, h) {
+  ctx.fillStyle = NODATA_BG
+  ctx.fillRect(x, y, w, h)
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(x, y, w, h)
+  ctx.clip()
+  ctx.strokeStyle = NODATA_HATCH
+  ctx.lineWidth = 1
+  const step = 10
+  for (let lx = x - h; lx < x + w; lx += step) {
+    ctx.beginPath()
+    ctx.moveTo(lx, y + h)
+    ctx.lineTo(lx + h, y)
+    ctx.stroke()
+  }
+  ctx.restore()
 }
 
 // Real-road-style paint markings: solid white edge lines at the shoulder
@@ -494,6 +578,12 @@ function drawLaneMarkings(ctx, { x, w, laneBandTop, offset, numLanes }) {
 
   ctx.save()
   ctx.strokeStyle = MARKING_COLOR
+  // Anchors the dash pattern to the strip's absolute x origin rather than
+  // this block's own local x -- without it, two adjacent blocks (drawn
+  // separately, each starting its dash cycle fresh at its own left edge)
+  // visibly break the line where one ends and the next begins, even though
+  // the lane marking is logically continuous across them.
+  ctx.lineDashOffset = -x
 
   // Solid edge lines
   ctx.setLineDash([])
@@ -590,7 +680,4 @@ function drawArrowsAlong(ctx, x, w, y, pointsRight) {
 function paintCell(ctx, x, y, w, h, surfaceType, scale = 1) {
   ctx.fillStyle = fillForCell(ctx, surfaceType, x, y, w, h, scale)
   ctx.fillRect(x, y, w, h)
-  ctx.strokeStyle = BLOCK_BOUNDARY_COLOR
-  ctx.lineWidth = 1
-  ctx.strokeRect(x, y, w, h)
 }
