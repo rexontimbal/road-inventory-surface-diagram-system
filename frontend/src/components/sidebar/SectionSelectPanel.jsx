@@ -112,23 +112,25 @@ export default function SectionSelectPanel({
           {roadName || <span className="readonly-placeholder">Auto-filled after selecting a section</span>}
         </div>
       </label>
-      <div className="section-auto-fill-row">
-        <label>
-          Classification
-          <div className="readonly-display readonly-display-sm">
-            {classification || <span className="readonly-placeholder">—</span>}
-          </div>
-        </label>
-        <label>
-          DEO
-          <div className="readonly-display readonly-display-sm" title={deo}>
-            {deo || <span className="readonly-placeholder">—</span>}
-          </div>
-        </label>
-      </div>
+      <label>
+        Classification
+        <div className="readonly-display">
+          {classification ? (
+            <span className="classification-badge">{classification}</span>
+          ) : (
+            <span className="readonly-placeholder">—</span>
+          )}
+        </div>
+      </label>
+      <label>
+        DEO
+        <div className="readonly-display">
+          {deo || <span className="readonly-placeholder">—</span>}
+        </div>
+      </label>
       <label>
         LD
-        <div className="readonly-display readonly-display-sm" title={ld}>
+        <div className="readonly-display">
           {ld || <span className="readonly-placeholder">—</span>}
         </div>
       </label>

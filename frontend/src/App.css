@@ -675,8 +675,7 @@
   min-width: 0;
 }
 .sidebar .panel select,
-.sidebar .panel input[type='text'],
-.sidebar .readonly-display {
+.sidebar .panel input[type='text'] {
   box-sizing: border-box;
   width: 100%;
   height: 32px;
@@ -711,11 +710,29 @@
 .panel input[type='text'].field-invalid:focus {
   box-shadow: 0 0 0 3px rgba(208, 59, 59, 0.15);
 }
+/* Read-only display field (Road Name/Classification/DEO/LD in "2. Select
+   Section") -- deliberately NOT built on the shared input/select rule above:
+   those are fixed-height (32px) single-line controls, but these need to grow
+   with (potentially multi-line) content instead of clipping it. Visually
+   distinct from an editable input on purpose (dashed border, muted
+   background, no focus ring, not an <input> so there's no caret) so it
+   doesn't invite clicking/typing. */
 .readonly-display {
+  box-sizing: border-box;
+  width: 100%;
+  height: auto;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: break-word;
   display: flex;
   align-items: center;
-  border-style: dashed;
-  background: var(--surface-sunken);
 }
 .readonly-placeholder {
   color: var(--text-muted);
@@ -957,20 +974,6 @@
   padding: 1px 6px;
 }
 
-/* "2. Select Section"'s Classification/DEO side-by-side read-only pair --
-   same readonly-display look as Road Name, just two narrower fields sharing
-   a row instead of one full-width field. */
-.section-auto-fill-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 10px;
-}
-.readonly-display-sm {
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .custom-select-surface-option {
   display: flex;
   align-items: center;
