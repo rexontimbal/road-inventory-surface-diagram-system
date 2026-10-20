@@ -11,14 +11,14 @@ function formatDate(iso) {
 }
 
 /**
- * Shown when an upload contains Road IDs that already exist. Nothing is
- * saved until the user picks Replace/Keep per road (or bulk) and clicks
+ * Shown when an upload contains Section IDs that already exist. Nothing is
+ * saved until the user picks Replace/Keep per section (or bulk) and clicks
  * Continue -- Cancel discards the whole upload, including any brand-new
- * roads that had no conflict.
+ * sections that had no conflict.
  */
 export default function UploadConflictModal({ duplicates, newCount, sourceFile, onCancel, onContinue }) {
   const [decisions, setDecisions] = useState(() =>
-    Object.fromEntries(duplicates.map((d) => [d.road_id, 'keep']))
+    Object.fromEntries(duplicates.map((d) => [d.section_id, 'keep']))
   )
   const cardRef = useRef(null)
   const { zIndex, isTop } = useModalLayer()
@@ -41,16 +41,16 @@ export default function UploadConflictModal({ duplicates, newCount, sourceFile, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  function setDecision(roadId, value) {
-    setDecisions((prev) => ({ ...prev, [roadId]: value }))
+  function setDecision(sectionId, value) {
+    setDecisions((prev) => ({ ...prev, [sectionId]: value }))
   }
 
   function setAll(value) {
-    setDecisions(Object.fromEntries(duplicates.map((d) => [d.road_id, value])))
+    setDecisions(Object.fromEntries(duplicates.map((d) => [d.section_id, value])))
   }
 
   const title =
-    duplicates.length === 1 ? 'Road ID already exists' : `${duplicates.length} Road IDs already exist`
+    duplicates.length === 1 ? 'Section ID already exists' : `${duplicates.length} Section IDs already exist`
 
   if (zIndex == null) return null
 
@@ -102,9 +102,9 @@ export default function UploadConflictModal({ duplicates, newCount, sourceFile, 
 
         <div className="conflict-list thin-scroll">
           {duplicates.map((d) => (
-            <div key={d.road_id} className="conflict-row">
+            <div key={d.section_id} className="conflict-row">
               <div className="conflict-row-head">
-                <span className="mono conflict-road-id">{d.road_id}</span>
+                <span className="mono conflict-road-id">{d.section_id}</span>
                 <span className="conflict-road-name">{d.new_road_name}</span>
               </div>
               {d.name_changed && (
@@ -133,20 +133,20 @@ export default function UploadConflictModal({ duplicates, newCount, sourceFile, 
                   <span className="conflict-compare-muted">from {sourceFile}</span>
                 </div>
               </div>
-              <div className="conflict-toggle" role="group" aria-label={`Choice for ${d.road_id}`}>
+              <div className="conflict-toggle" role="group" aria-label={`Choice for ${d.section_id}`}>
                 <button
                   type="button"
-                  className={`conflict-toggle-btn${decisions[d.road_id] === 'replace' ? ' conflict-toggle-btn-active' : ''}`}
-                  aria-pressed={decisions[d.road_id] === 'replace'}
-                  onClick={() => setDecision(d.road_id, 'replace')}
+                  className={`conflict-toggle-btn${decisions[d.section_id] === 'replace' ? ' conflict-toggle-btn-active' : ''}`}
+                  aria-pressed={decisions[d.section_id] === 'replace'}
+                  onClick={() => setDecision(d.section_id, 'replace')}
                 >
                   Replace
                 </button>
                 <button
                   type="button"
-                  className={`conflict-toggle-btn${decisions[d.road_id] === 'keep' ? ' conflict-toggle-btn-active' : ''}`}
-                  aria-pressed={decisions[d.road_id] === 'keep'}
-                  onClick={() => setDecision(d.road_id, 'keep')}
+                  className={`conflict-toggle-btn${decisions[d.section_id] === 'keep' ? ' conflict-toggle-btn-active' : ''}`}
+                  aria-pressed={decisions[d.section_id] === 'keep'}
+                  onClick={() => setDecision(d.section_id, 'keep')}
                 >
                   Keep existing
                 </button>

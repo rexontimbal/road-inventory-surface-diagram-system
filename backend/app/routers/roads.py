@@ -4,14 +4,16 @@ import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
+import openpyxl
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
 from app.db import get_db
+from app.chainage import summarize_warnings
 from app.excel_import import ImportResult, TemplateError, parse_upload
-from app.models import SURFACE_TYPES, Road, RoadSegment, UploadLogEntry  # noqa: F401 -- UploadLogEntry import registers the table for create_all
+from app.models import SHOULDER_TYPES, SURFACE_TYPES, Road, RoadSegment, UploadLogEntry  # noqa: F401 -- UploadLogEntry import registers the table for create_all
 from app.scope import Scope, apply_scope, get_scope, owner_kwargs, user_kwargs
 from app.schemas import (
     LogUserOut,
@@ -25,7 +27,9 @@ from app.schemas import (
     RoadSummary,
     RoadSummaryStat,
     RowErrorOut,
+    RowWarningOut,
     SegmentEditIn,
+    WarningGroupOut,
     SegmentEditOut,
     SegmentFieldChange,
     SegmentOut,
@@ -65,13 +69,13 @@ def _derive_status(surface_type: str) -> str:
 _STATUS_RANK = case((RoadSegment.surface_type == "asphalt", 1), else_=0)
 
 _SORT_COLUMNS = {
-    "road_id": RoadSegment.road_id,
+    "section_id": RoadSegment.section_id,
     "road_name": Road.road_name,
-    # Sorted on the parsed integer-meters columns, not the raw "K+MMM" text,
-    # so stations order numerically (2+000 before 10+000) rather than
-    # lexically (where "10+000" would sort before "2+000").
+    # Sorted on the parsed numeric-meters columns, not the raw station text,
+    # so stations order numerically rather than lexically.
     "start_station": RoadSegment.start_m,
     "end_station": RoadSegment.end_m,
+    "length_m": RoadSegment.length_m,
     "num_lanes": RoadSegment.num_lanes,
     "surface_type": RoadSegment.surface_type,
     "shoulder_left": RoadSegment.shoulder_left,
@@ -80,24 +84,28 @@ _SORT_COLUMNS = {
 }
 
 
-def _filtered_segments_query(db, scope: Scope, road_id, status, surface_type):
+def _filtered_segments_query(db, scope: Scope, section_id, district, classification, status, surface_type):
     if status is not None and status not in ("Complete", "Incomplete"):
         raise HTTPException(status_code=400, detail="status must be 'Complete' or 'Incomplete'")
 
-    # road_id alone is no longer unique across scopes (see Road's composite
-    # primary key) -- the join must match the full (road_id, owner_type,
+    # section_id alone is no longer unique across scopes (see Road's composite
+    # primary key) -- the join must match the full (section_id, owner_type,
     # owner_id) triple, or a guest's segment could join against the
-    # workspace's same-road_id road (or vice versa) and leak its road_name.
-    query = db.query(RoadSegment, Road.road_name).join(
+    # workspace's same-section_id road (or vice versa) and leak its road_name.
+    query = db.query(RoadSegment, Road.road_name, Road.classification, Road.deo, Road.ld).join(
         Road,
-        (Road.road_id == RoadSegment.road_id)
+        (Road.section_id == RoadSegment.section_id)
         & (Road.owner_type == RoadSegment.owner_type)
         & (Road.owner_id == RoadSegment.owner_id),
     )
     query = apply_scope(query, Road, scope)
 
-    if road_id:
-        query = query.filter(RoadSegment.road_id == road_id)
+    if section_id:
+        query = query.filter(RoadSegment.section_id == section_id)
+    if district:
+        query = query.filter(Road.deo == district)
+    if classification:
+        query = query.filter(Road.classification == classification)
     if surface_type:
         query = query.filter(RoadSegment.surface_type == surface_type)
     if status == "Complete":
@@ -110,7 +118,7 @@ def _filtered_segments_query(db, scope: Scope, road_id, status, surface_type):
 
 def _apply_sort(query, sort_by, sort_dir):
     if sort_by is None:
-        return query.order_by(RoadSegment.road_id, RoadSegment.seq_no)
+        return query.order_by(RoadSegment.section_id, RoadSegment.seq_no)
 
     column = _SORT_COLUMNS.get(sort_by)
     if column is None:
@@ -122,25 +130,59 @@ def _apply_sort(query, sort_by, sort_dir):
 
     ordered = column.desc() if sort_dir == "desc" else column.asc()
     # Secondary key keeps same-value rows in a stable, predictable sequence.
-    return query.order_by(ordered, RoadSegment.road_id, RoadSegment.seq_no)
+    return query.order_by(ordered, RoadSegment.section_id, RoadSegment.seq_no)
 
 
 def _rejected_out(result: ImportResult) -> list[RoadRejectionOut]:
     return [
         RoadRejectionOut(
-            road_id=r.road_id,
+            section_id=r.section_id,
             errors=[RowErrorOut(row=e.row, field=e.field, message=e.message) for e in r.errors],
         )
         for r in result.rejected
     ]
 
 
+_TEMPLATE_COLUMNS = [
+    "Section ID",
+    "Classification",
+    "DEO",
+    "LD",
+    "Road Name",
+    "Start",
+    "End",
+    "Number of Lanes",
+    "Surface type",
+    "LEFT",
+    "RIGHT",
+]
+
+
+@router.get("/template")
+def download_template():
+    """A blank DPWH-format workbook the user can fill in and re-upload --
+    single header row (no decorative group-header row) is fine since the
+    parser finds the header row by content, not by a fixed row number."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Road Data"
+    ws.append(_TEMPLATE_COLUMNS)
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=road_inventory_template.xlsx"},
+    )
+
+
 @router.post("/upload/preview", response_model=UploadPreview)
 async def upload_preview(file: UploadFile, db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
     """Parses and validates the file (same rules as before) but writes
-    nothing. Splits accepted roads into brand-new vs. Road-ID conflicts with
-    an existing road (trimmed, case-insensitive match) so the frontend can
-    ask the user how to handle each conflict before anything is saved.
+    nothing. Splits accepted roads into brand-new vs. Section-ID conflicts
+    with an existing road (trimmed, case-insensitive match) so the frontend
+    can ask the user how to handle each conflict before anything is saved.
     "Existing" only ever means within the caller's own scope -- a guest's
     upload can never conflict with (or even see) the shared workspace's
     roads, and vice versa."""
@@ -166,17 +208,17 @@ async def upload_preview(file: UploadFile, db: Session = Depends(get_db), scope:
     _PENDING_UPLOADS[token] = (result, file.filename, len(contents), time.time() + _PENDING_TTL_SECONDS)
 
     existing_by_key = {
-        road.road_id.strip().lower(): road for road in apply_scope(db.query(Road), Road, scope).all()
+        road.section_id.strip().lower(): road for road in apply_scope(db.query(Road), Road, scope).all()
     }
 
     new_roads: list[RoadPreviewNew] = []
     duplicates: list[RoadPreviewDuplicate] = []
     for plan in result.accepted:
-        existing = existing_by_key.get(plan.road_id.strip().lower())
+        existing = existing_by_key.get(plan.section_id.strip().lower())
         if existing is None:
             new_roads.append(
                 RoadPreviewNew(
-                    road_id=plan.road_id,
+                    section_id=plan.section_id,
                     road_name=plan.road_name,
                     segment_count=len(plan.segments),
                     total_length_m=plan.total_length_m,
@@ -185,7 +227,7 @@ async def upload_preview(file: UploadFile, db: Session = Depends(get_db), scope:
         else:
             duplicates.append(
                 RoadPreviewDuplicate(
-                    road_id=plan.road_id,
+                    section_id=plan.section_id,
                     existing_road_name=existing.road_name,
                     new_road_name=plan.road_name,
                     name_changed=existing.road_name.strip().lower() != plan.road_name.strip().lower(),
@@ -212,10 +254,15 @@ async def upload_preview(file: UploadFile, db: Session = Depends(get_db), scope:
 @router.post("/upload/commit", response_model=UploadResult)
 def upload_commit(body: UploadCommitIn, db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
     """Applies a previously-previewed upload. `decisions` only needs entries
-    for road IDs that were flagged as duplicates in the preview -- any
+    for section IDs that were flagged as duplicates in the preview -- any
     accepted road with no decision (i.e. it was new, no conflict) is always
     added. 'keep' leaves the existing road completely untouched; 'replace'
-    deletes its old segments and inserts the new ones (no mixing)."""
+    deletes its old segments and inserts the new ones (no mixing).
+
+    Segment rows are bulk-inserted in one transaction (bulk_insert_mappings,
+    not one ORM object + db.add() per row) -- a real DPWH file runs to
+    ~11,200 rows, and per-row ORM object construction/flush tracking is the
+    bottleneck at that volume."""
     _prune_pending_uploads()
     entry = _PENDING_UPLOADS.pop(body.token, None)
     if entry is None:
@@ -226,23 +273,26 @@ def upload_commit(body: UploadCommitIn, db: Session = Depends(get_db), scope: Sc
     result, source_file, file_size, _ = entry
 
     existing_by_key = {
-        road.road_id.strip().lower(): road for road in apply_scope(db.query(Road), Road, scope).all()
+        road.section_id.strip().lower(): road for road in apply_scope(db.query(Road), Road, scope).all()
     }
 
     now = datetime.now(timezone.utc).isoformat()
     imported: list[RoadImportedOut] = []
     skipped: list[RoadSkippedOut] = []
     log_details: list[dict] = []
+    segment_mappings: list[dict] = []
+    all_warnings = []
+    owner = owner_kwargs(scope)
 
     for plan in result.accepted:
-        existing = existing_by_key.get(plan.road_id.strip().lower())
-        action = body.decisions.get(plan.road_id, "replace")
+        existing = existing_by_key.get(plan.section_id.strip().lower())
+        action = body.decisions.get(plan.section_id, "replace")
 
         if existing is not None and action == "keep":
-            skipped.append(RoadSkippedOut(road_id=plan.road_id, road_name=plan.road_name))
+            skipped.append(RoadSkippedOut(section_id=plan.section_id, road_name=plan.road_name))
             log_details.append(
                 {
-                    "road_id": plan.road_id,
+                    "section_id": plan.section_id,
                     "road_name": plan.road_name,
                     "action": "kept_existing",
                     "segment_count": existing.segment_count,
@@ -264,67 +314,89 @@ def upload_commit(body: UploadCommitIn, db: Session = Depends(get_db), scope: Sc
 
         uploaded_at = existing.uploaded_at if existing is not None and existing.uploaded_at else now
 
-        apply_scope(db.query(RoadSegment), RoadSegment, scope).filter(RoadSegment.road_id == plan.road_id).delete()
-        apply_scope(db.query(Road), Road, scope).filter(Road.road_id == plan.road_id).delete()
+        apply_scope(db.query(RoadSegment), RoadSegment, scope).filter(
+            RoadSegment.section_id == plan.section_id
+        ).delete()
+        apply_scope(db.query(Road), Road, scope).filter(Road.section_id == plan.section_id).delete()
 
         road = Road(
-            road_id=plan.road_id,
+            section_id=plan.section_id,
             road_name=plan.road_name,
+            classification=plan.classification,
+            deo=plan.deo,
+            ld=plan.ld,
             updated_at=now,
             uploaded_at=uploaded_at,
             source_file=source_file,
             segment_count=len(plan.segments),
             total_length_m=plan.total_length_m,
-            **owner_kwargs(scope),
+            **owner,
         )
         db.add(road)
 
         for seq_no, seg in enumerate(plan.segments):
-            db.add(
-                RoadSegment(
-                    road_id=plan.road_id,
-                    seq_no=seq_no,
-                    start_station_raw=seg.start_station_raw,
-                    end_station_raw=seg.end_station_raw,
-                    start_m=seg.start_m,
-                    end_m=seg.end_m,
-                    num_lanes=seg.num_lanes,
-                    surface_type=seg.surface_type,
-                    shoulder_left=seg.shoulder_left,
-                    shoulder_right=seg.shoulder_right,
-                    source_row_number=seg.row_number,
-                    **owner_kwargs(scope),
-                )
+            segment_mappings.append(
+                {
+                    "section_id": plan.section_id,
+                    "owner_type": owner["owner_type"],
+                    "owner_id": owner["owner_id"],
+                    "seq_no": seq_no,
+                    "start_text": seg.start_text,
+                    "end_text": seg.end_text,
+                    "start_m": seg.start_m,
+                    "end_m": seg.end_m,
+                    "length_m": seg.length_m,
+                    "irregular_km_post": seg.irregular_km_post,
+                    "num_lanes": seg.num_lanes,
+                    "surface_type": seg.surface_type,
+                    "shoulder_left": seg.shoulder_left,
+                    "shoulder_right": seg.shoulder_right,
+                    "source_row_number": seg.row_number,
+                }
             )
 
         row_action = "up_to_date" if is_up_to_date else ("replaced" if existing is not None else "added")
+        section_warning_groups = [WarningGroupOut(**g) for g in summarize_warnings(plan.warnings)]
+        all_warnings.extend(plan.warnings)
         imported.append(
             RoadImportedOut(
-                road_id=plan.road_id,
+                section_id=plan.section_id,
                 road_name=plan.road_name,
                 segment_count=len(plan.segments),
                 action=row_action,
+                warnings=[
+                    RowWarningOut(row=w.row, field=w.field, message=w.message, kind=w.kind) for w in plan.warnings
+                ],
+                warning_groups=section_warning_groups,
             )
         )
         log_details.append(
             {
-                "road_id": plan.road_id,
+                "section_id": plan.section_id,
                 "road_name": plan.road_name,
                 "action": row_action,
                 "segment_count": len(plan.segments),
                 "change_summary": change_summary,
+                "warning_groups": [g.model_dump() for g in section_warning_groups],
             }
         )
 
     for rejection in result.rejected:
         log_details.append(
             {
-                "road_id": rejection.road_id,
-                "road_name": rejection.road_id,
+                "section_id": rejection.section_id,
+                "road_name": rejection.section_id,
                 "action": "rejected",
                 "rejection_reasons": [f"Row {e.row} ({e.field}): {e.message}" for e in rejection.errors],
             }
         )
+
+    # Flush Road rows first so the segments' FK (section_id, owner_type,
+    # owner_id -> roads) resolves, then bulk-insert every segment in one
+    # round trip instead of one db.add() per row.
+    db.flush()
+    if segment_mappings:
+        db.bulk_insert_mappings(RoadSegment, segment_mappings)
 
     log_entry = write_log_entry(
         db,
@@ -347,6 +419,7 @@ def upload_commit(body: UploadCommitIn, db: Session = Depends(get_db), scope: Sc
         total_rows_processed=result.total_rows_processed,
         ignored_columns=result.ignored_columns,
         log_id=log_entry.id,
+        warning_groups=[WarningGroupOut(**g) for g in summarize_warnings(all_warnings)],
     )
 
 
@@ -367,13 +440,18 @@ def upload_cancel(body: UploadCancelIn, db: Session = Depends(get_db), scope: Sc
         total_rows = result.total_rows_processed
         for plan in result.accepted:
             log_details.append(
-                {"road_id": plan.road_id, "road_name": plan.road_name, "action": "added", "segment_count": len(plan.segments)}
+                {
+                    "section_id": plan.section_id,
+                    "road_name": plan.road_name,
+                    "action": "added",
+                    "segment_count": len(plan.segments),
+                }
             )
         for rejection in result.rejected:
             log_details.append(
                 {
-                    "road_id": rejection.road_id,
-                    "road_name": rejection.road_id,
+                    "section_id": rejection.section_id,
+                    "road_name": rejection.section_id,
                     "action": "rejected",
                     "rejection_reasons": [f"Row {e.row} ({e.field}): {e.message}" for e in rejection.errors],
                 }
@@ -396,15 +474,26 @@ def upload_cancel(body: UploadCancelIn, db: Session = Depends(get_db), scope: Sc
 
 @router.get("", response_model=list[RoadSummary])
 def list_roads(db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
-    roads = apply_scope(db.query(Road), Road, scope).order_by(Road.road_id).all()
-    return [RoadSummary(road_id=r.road_id, road_name=r.road_name) for r in roads]
+    roads = apply_scope(db.query(Road), Road, scope).order_by(Road.section_id).all()
+    return [
+        RoadSummary(
+            section_id=r.section_id,
+            road_name=r.road_name,
+            classification=r.classification,
+            deo=r.deo,
+            ld=r.ld,
+        )
+        for r in roads
+    ]
 
 
 @router.get("/segments", response_model=SegmentsPage)
 def list_segments(
     page: int = 1,
     page_size: int = 20,
-    road_id: str | None = None,
+    section_id: str | None = None,
+    district: str | None = None,
+    classification: str | None = None,
     status: str | None = None,
     surface_type: str | None = None,
     sort_by: str | None = None,
@@ -417,7 +506,7 @@ def list_segments(
     if page_size < 1 or page_size > 500:
         raise HTTPException(status_code=400, detail="page_size must be between 1 and 500")
 
-    base_query = _filtered_segments_query(db, scope, road_id, status, surface_type)
+    base_query = _filtered_segments_query(db, scope, section_id, district, classification, status, surface_type)
     total_records = base_query.count()
     total_pages = max(1, (total_records + page_size - 1) // page_size)
 
@@ -432,17 +521,22 @@ def list_segments(
         SegmentRecord(
             id=seg.id,
             index=(page - 1) * page_size + i + 1,
-            road_id=seg.road_id,
+            section_id=seg.section_id,
             road_name=road_name,
-            start_station=seg.start_station_raw,
-            end_station=seg.end_station_raw,
+            classification=seg_classification,
+            deo=seg_deo,
+            ld=seg_ld,
+            start_station=seg.start_text,
+            end_station=seg.end_text,
+            length_m=seg.length_m,
+            irregular_km_post=seg.irregular_km_post,
             num_lanes=seg.num_lanes,
             surface_type=seg.surface_type,
             shoulder_left=seg.shoulder_left,
             shoulder_right=seg.shoulder_right,
             status=_derive_status(seg.surface_type),
         )
-        for i, (seg, road_name) in enumerate(rows)
+        for i, (seg, road_name, seg_classification, seg_deo, seg_ld) in enumerate(rows)
     ]
 
     return SegmentsPage(
@@ -478,16 +572,21 @@ def edit_segment(
     seg = apply_scope(db.query(RoadSegment), RoadSegment, scope).filter(RoadSegment.id == segment_id).first()
     if seg is None:
         raise HTTPException(status_code=404, detail="Segment not found")
-    road = apply_scope(db.query(Road), Road, scope).filter(Road.road_id == seg.road_id).first()
+    road = apply_scope(db.query(Road), Road, scope).filter(Road.section_id == seg.section_id).first()
 
     if body.num_lanes is not None and not (1 <= body.num_lanes <= 12):
         raise HTTPException(status_code=400, detail="Number of Lanes must be between 1 and 12")
-    for field_name in ("surface_type", "shoulder_left", "shoulder_right"):
+    if body.surface_type is not None and body.surface_type not in SURFACE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{_EDITABLE_FIELD_LABELS['surface_type']} must be one of {sorted(SURFACE_TYPES)}",
+        )
+    for field_name in ("shoulder_left", "shoulder_right"):
         value = getattr(body, field_name)
-        if value is not None and value not in SURFACE_TYPES:
+        if value is not None and value not in SHOULDER_TYPES:
             raise HTTPException(
                 status_code=400,
-                detail=f"{_EDITABLE_FIELD_LABELS[field_name]} must be one of {sorted(SURFACE_TYPES)}",
+                detail=f"{_EDITABLE_FIELD_LABELS[field_name]} must be one of {sorted(SHOULDER_TYPES)}",
             )
 
     changes: list[SegmentFieldChange] = []
@@ -509,10 +608,10 @@ def edit_segment(
             db,
             kind="edit",
             status="completed",
-            file_name=f"Inline edit: {seg.road_id} ({seg.start_station_raw}–{seg.end_station_raw})",
+            file_name=f"Inline edit: {seg.section_id} ({seg.start_text}–{seg.end_text})",
             details=[
                 {
-                    "road_id": seg.road_id,
+                    "section_id": seg.section_id,
                     "road_name": road.road_name,
                     "action": "edited",
                     "change_summary": "; ".join(f"{c['field']}: {c['old']} → {c['new']}" for c in change_dicts),
@@ -529,10 +628,10 @@ def edit_segment(
         segment=SegmentRecord(
             id=seg.id,
             index=0,
-            road_id=seg.road_id,
+            section_id=seg.section_id,
             road_name=road.road_name,
-            start_station=seg.start_station_raw,
-            end_station=seg.end_station_raw,
+            start_station=seg.start_text,
+            end_station=seg.end_text,
             num_lanes=seg.num_lanes,
             surface_type=seg.surface_type,
             shoulder_left=seg.shoulder_left,
@@ -545,7 +644,9 @@ def edit_segment(
 
 @router.get("/segments/export")
 def export_segments(
-    road_id: str | None = None,
+    section_id: str | None = None,
+    district: str | None = None,
+    classification: str | None = None,
     status: str | None = None,
     surface_type: str | None = None,
     sort_by: str | None = None,
@@ -553,17 +654,21 @@ def export_segments(
     db: Session = Depends(get_db),
     scope: Scope = Depends(get_scope),
 ):
-    base_query = _filtered_segments_query(db, scope, road_id, status, surface_type)
+    base_query = _filtered_segments_query(db, scope, section_id, district, classification, status, surface_type)
     rows = _apply_sort(base_query, sort_by, sort_dir).all()
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow(
         [
-            "Road ID",
+            "Section ID",
             "Road Name",
+            "Classification",
+            "DEO",
+            "LD",
             "Start Station",
             "End Station",
+            "Length (m)",
             "Number of Lanes",
             "Surface Type",
             "Left Shoulder",
@@ -571,13 +676,17 @@ def export_segments(
             "Status",
         ]
     )
-    for seg, road_name in rows:
+    for seg, road_name, seg_classification, seg_deo, seg_ld in rows:
         writer.writerow(
             [
-                seg.road_id,
+                seg.section_id,
                 road_name,
-                seg.start_station_raw,
-                seg.end_station_raw,
+                seg_classification,
+                seg_deo,
+                seg_ld,
+                seg.start_text,
+                seg.end_text,
+                seg.length_m,
                 seg.num_lanes,
                 seg.surface_type,
                 seg.shoulder_left,
@@ -599,12 +708,13 @@ def get_network_summary(db: Session = Depends(get_db), scope: Scope = Depends(ge
     road_stats = (
         apply_scope(
             db.query(
-                Road.road_id,
+                Road.section_id,
                 Road.road_name,
-                func.sum(RoadSegment.end_m - RoadSegment.start_m).label("total_length_m"),
+                Road.deo,
+                func.sum(RoadSegment.length_m).label("total_length_m"),
                 func.sum(
                     case(
-                        (RoadSegment.surface_type == "asphalt", RoadSegment.end_m - RoadSegment.start_m),
+                        (RoadSegment.surface_type == "asphalt", RoadSegment.length_m),
                         else_=0,
                     )
                 ).label("asphalt_length_m"),
@@ -613,29 +723,30 @@ def get_network_summary(db: Session = Depends(get_db), scope: Scope = Depends(ge
             scope,
         )
         # Full composite join -- see _filtered_segments_query's comment on
-        # why road_id alone is not enough to match the right scope's rows.
+        # why section_id alone is not enough to match the right scope's rows.
         .join(
             RoadSegment,
-            (RoadSegment.road_id == Road.road_id)
+            (RoadSegment.section_id == Road.section_id)
             & (RoadSegment.owner_type == Road.owner_type)
             & (RoadSegment.owner_id == Road.owner_id),
         )
-        .group_by(Road.road_id, Road.road_name)
-        .order_by(Road.road_id)
+        .group_by(Road.section_id, Road.road_name, Road.deo)
+        .order_by(Road.section_id)
         .all()
     )
 
     roads = []
-    network_total = 0
-    network_asphalt = 0
-    for road_id, road_name, total_length_m, asphalt_length_m in road_stats:
-        total_length_m = total_length_m or 0
-        asphalt_length_m = asphalt_length_m or 0
+    network_total = 0.0
+    network_asphalt = 0.0
+    for section_id, road_name, deo, total_length_m, asphalt_length_m in road_stats:
+        total_length_m = total_length_m or 0.0
+        asphalt_length_m = asphalt_length_m or 0.0
         pct = round((asphalt_length_m / total_length_m) * 100) if total_length_m > 0 else 0
         roads.append(
             RoadSummaryStat(
-                road_id=road_id,
+                section_id=section_id,
                 road_name=road_name,
+                deo=deo,
                 total_length_m=total_length_m,
                 asphalt_length_m=asphalt_length_m,
                 pct=pct,
@@ -703,19 +814,21 @@ def clear_upload_log(db: Session = Depends(get_db), scope: Scope = Depends(get_s
     return {"cleared": count}
 
 
-@router.get("/{road_id}", response_model=RoadDetail)
-def get_road_detail(road_id: str, db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
-    road = apply_scope(db.query(Road), Road, scope).filter(Road.road_id == road_id).first()
+@router.get("/{section_id}", response_model=RoadDetail)
+def get_road_detail(section_id: str, db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
+    road = apply_scope(db.query(Road), Road, scope).filter(Road.section_id == section_id).first()
     if road is None:
-        raise HTTPException(status_code=404, detail=f"Road '{road_id}' not found")
+        raise HTTPException(status_code=404, detail=f"Section '{section_id}' not found")
 
     segments = [
         SegmentOut(
             seq_no=seg.seq_no,
-            start_station=seg.start_station_raw,
-            end_station=seg.end_station_raw,
+            start_station=seg.start_text,
+            end_station=seg.end_text,
             start_m=seg.start_m,
             end_m=seg.end_m,
+            length_m=seg.length_m,
+            irregular_km_post=seg.irregular_km_post,
             num_lanes=seg.num_lanes,
             surface_type=seg.surface_type,
             shoulder_left=seg.shoulder_left,
@@ -725,27 +838,30 @@ def get_road_detail(road_id: str, db: Session = Depends(get_db), scope: Scope = 
     ]
 
     return RoadDetail(
-        road_id=road.road_id,
+        section_id=road.section_id,
         road_name=road.road_name,
+        classification=road.classification,
+        deo=road.deo,
+        ld=road.ld,
         total_length_m=road.total_length_m,
         segments=segments,
     )
 
 
-@router.delete("/{road_id}")
-def delete_road(road_id: str, db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
-    road = apply_scope(db.query(Road), Road, scope).filter(Road.road_id == road_id).first()
+@router.delete("/{section_id}")
+def delete_road(section_id: str, db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
+    road = apply_scope(db.query(Road), Road, scope).filter(Road.section_id == section_id).first()
     if road is None:
-        raise HTTPException(status_code=404, detail=f"Road '{road_id}' not found")
+        raise HTTPException(status_code=404, detail=f"Section '{section_id}' not found")
     road_name = road.road_name
     db.delete(road)
     write_log_entry(
         db,
         kind="delete",
         status="completed",
-        details=[{"road_id": road_id, "road_name": road_name, "action": "deleted"}],
+        details=[{"section_id": section_id, "road_name": road_name, "action": "deleted"}],
         **owner_kwargs(scope),
         **user_kwargs(scope),
     )
     db.commit()
-    return {"deleted": road_id}
+    return {"deleted": section_id}

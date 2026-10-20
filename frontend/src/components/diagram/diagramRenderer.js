@@ -1,4 +1,5 @@
 import { fillForCell } from './surfacePatterns'
+import { formatDpwhStation, formatPlainStationLabel, isDpwhStyle } from '../../utils/chainage'
 
 const BASE_STRIP_WIDTH_PX = 1200
 // Minimum horizontal space reserved per station-interval column so its tick
@@ -36,7 +37,7 @@ const STRIP_GAP = 44
 const BORDER_COLOR = '#333333'
 const MARKING_COLOR = 'rgba(255,255,255,0.75)'
 const ARROW_SPACING_PX = 70
-const MARKED_SURFACES = new Set(['asphalt', 'paved']) // surfaces with painted lane markings
+const MARKED_SURFACES = new Set(['asphalt', 'concrete']) // surfaces with painted lane markings
 const STATUS_DONE_COLOR = '#0ca30c'
 const STATUS_NOT_DONE_COLOR = '#d03b3b'
 // Matches the app's own body font stack (index.css) -- a named system font
@@ -47,10 +48,11 @@ const STATION_FONT = '11px system-ui, -apple-system, "Segoe UI", Roboto, sans-se
 // own side-bearing/antialiasing never reads as touching the canvas edge.
 const LABEL_EDGE_PADDING_PX = 8
 
-function formatStationLabel(meters) {
-  const km = Math.floor(meters / 1000)
-  const m = meters % 1000
-  return `Sta. ${km}+${String(m).padStart(3, '0')}`
+// DPWH km-post sections get "K1260 + 000" tick labels (no 'Sta.' prefix,
+// matching real DPWH range notation); plain-meter sections keep the
+// original "Sta. 0+000" label format unchanged.
+function stationLabelFormatter(road) {
+  return isDpwhStyle(road) ? formatDpwhStation : formatPlainStationLabel
 }
 
 // A throwaway canvas used purely for ctx.measureText() -- lets margins be
@@ -72,13 +74,13 @@ function getMeasureCtx() {
 // Measuring the actual widest terminal label (rather than assuming a flat
 // margin) keeps the reserved space exact: never so narrow it clips a long
 // label, never so wide it wastes space on a short one.
-function computeRightMargin(numStrips, baseM, stripSpanM, totalLengthM) {
+function computeRightMargin(numStrips, baseM, stripSpanM, totalLengthM, labelFn) {
   if (numStrips === 0) return RIGHT_MARGIN_FALLBACK
   const ctx = getMeasureCtx()
   let maxWidth = 0
   for (let s = 0; s < numStrips; s++) {
     const stripEndM = Math.min(baseM + (s + 1) * stripSpanM, baseM + totalLengthM)
-    const w = ctx.measureText(formatStationLabel(stripEndM)).width
+    const w = ctx.measureText(labelFn(stripEndM)).width
     if (w > maxWidth) maxWidth = w
   }
   return Math.ceil(maxWidth / 2) + LABEL_EDGE_PADDING_PX
@@ -110,10 +112,14 @@ function computeStripPlan(road, settings, range) {
   const numStrips = totalLengthM > 0 ? Math.ceil(totalLengthM / stripSpanM) : 0
 
   // Only segments actually visible within the range drive the lane-row band
-  // height, so a narrowed range isn't padded for lanes that never appear in it.
-  const relevantSegments = range
-    ? road.segments.filter((s) => s.end_m > range.startM && s.start_m < range.endM)
-    : road.segments
+  // height, so a narrowed range isn't padded for lanes that never appear in
+  // it. Irregular (length <= 0) segments are excluded outright -- they're
+  // never drawn (see drawStrip's clip check, which always skips them since
+  // end_m <= start_m by construction), so they shouldn't inflate the lane
+  // band either.
+  const relevantSegments = (
+    range ? road.segments.filter((s) => s.end_m > range.startM && s.start_m < range.endM) : road.segments
+  ).filter((s) => !s.irregular_km_post)
 
   const globalMaxLanes = relevantSegments.length
     ? Math.max(...relevantSegments.map((s) => s.num_lanes))
@@ -121,7 +127,8 @@ function computeStripPlan(road, settings, range) {
   const laneBandH = globalMaxLanes * LANE_H
   const stripHeight = HEADER_H + STATUS_STRIP_H + SHOULDER_H + laneBandH + SHOULDER_H
   const stripWidthPx = Math.max(BASE_STRIP_WIDTH_PX, stationsPerLine * MIN_PX_PER_INTERVAL)
-  const rightMargin = computeRightMargin(numStrips, baseM, stripSpanM, totalLengthM)
+  const labelFn = stationLabelFormatter(road)
+  const rightMargin = computeRightMargin(numStrips, baseM, stripSpanM, totalLengthM, labelFn)
   const canvasWidth = LEFT_MARGIN + stripWidthPx + rightMargin
   const canvasHeight = numStrips > 0 ? TOP_MARGIN + numStrips * stripHeight + (numStrips - 1) * STRIP_GAP + 10 : 0
   return {
@@ -137,6 +144,7 @@ function computeStripPlan(road, settings, range) {
     canvasHeight,
     baseM,
     relevantSegments,
+    labelFn,
   }
 }
 
@@ -224,6 +232,7 @@ export function renderSingleStrip(canvas, road, settings, stripIndex, range, sca
     laneBandH: plan.laneBandH,
     hitRegions: [],
     scale: clampedScale,
+    labelFn: plan.labelFn,
   })
 }
 
@@ -231,7 +240,7 @@ export function renderSingleStrip(canvas, road, settings, stripIndex, range, sca
  * Renders the strip-map road surface diagram onto `canvas`.
  * `road` = { total_length_m, segments: [{start_m, end_m, num_lanes,
  *   surface_type, shoulder_left, shoulder_right}] } (segments must already be
- *   sorted by start_m, as returned by GET /api/roads/{road_id}).
+ *   sorted by start_m, as returned by GET /api/roads/{section_id}).
  * `settings` = { stationIntervalM, stationsPerLine }.
  * `range` (optional) = { startM, endM } to restrict the diagram to a station
  *   sub-range of the road, clipping segments at the boundaries and starting
@@ -289,6 +298,7 @@ export function renderDiagram(canvas, road, settings, range, scale = 1) {
       laneBandH,
       hitRegions,
       scale: clampedScale,
+      labelFn: plan.labelFn,
     })
   }
 
@@ -308,6 +318,7 @@ function drawStrip(ctx, cfg) {
     laneBandH,
     hitRegions,
     scale,
+    labelFn,
   } = cfg
 
   const statusStripY = y0 + HEADER_H
@@ -340,7 +351,7 @@ function drawStrip(ctx, cfg) {
     ctx.stroke()
 
     const isFirst = m === stripStartM
-    const label = formatStationLabel(m)
+    const label = labelFn(m)
     const textWidth = ctx.measureText(label).width
     const labelLeft = isFirst ? x : x - textWidth / 2
     const labelRight = isFirst ? x + textWidth : x + textWidth / 2
@@ -418,8 +429,8 @@ function drawStrip(ctx, cfg) {
 // boundary, thin dashed white lines between same-direction lanes, a double
 // dashed centerline at the direction split (the standard no-passing-zone
 // convention), and filled directional arrows per lane. Only called for
-// surfaces that would actually carry paint (asphalt/paved) -- unpaved/gravel
-// are left bare, which is itself realistic.
+// surfaces that would actually carry paint (asphalt/concrete) -- gravel/
+// earth/none are left bare, which is itself realistic.
 function drawLaneMarkings(ctx, { x, w, laneBandTop, offset, numLanes }) {
   const laneTop = laneBandTop + offset * LANE_H
   const laneBottom = laneBandTop + (offset + numLanes) * LANE_H

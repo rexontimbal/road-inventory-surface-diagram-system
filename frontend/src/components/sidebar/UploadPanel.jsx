@@ -10,20 +10,26 @@ import RestoreBackupModal from './RestoreBackupModal'
 const REQUIRED_COLUMNS_AUTO_HIDE_MS = 10000
 
 const REQUIRED_COLUMNS = [
-  'ROAD ID',
+  'Section ID',
+  'Classification',
+  'DEO',
+  'LD',
   'Road Name',
-  'Start Station',
-  'End Station',
+  'Start',
+  'End',
   'Number of Lanes',
   'Surface type',
-  'Shoulder Surface type Left',
-  'Shoulder Surface type Right',
+  'LEFT',
+  'RIGHT',
 ]
 
 // Builds the post-upload toast's variant + message from a commitUpload()
 // result. A single outcome bucket (e.g. everything just "added") reads as
 // the short "N roads uploaded"; a mix of added/replaced/up-to-date/kept
-// gets the itemized "Upload complete: ..." form instead.
+// gets the itemized "Upload complete: ..." form instead. Warnings (gaps,
+// irregular km posts, blank shoulders -- imported anyway) are appended as
+// one grouped-by-type summary, never one line per row -- full detail lives
+// in Upload History's expanded view instead.
 function buildUploadToast(res) {
   const addedCount = res.imported.filter((r) => r.action === 'added').length
   const replacedCount = res.imported.filter((r) => r.action === 'replaced').length
@@ -32,10 +38,13 @@ function buildUploadToast(res) {
   const rejectedCount = res.rejected.length
   const successCount = addedCount + replacedCount + upToDateCount + keptCount
 
+  const warningSuffix =
+    res.warning_groups?.length > 0 ? ` (${res.warning_groups.map((g) => `${g.count} ${g.label}`).join(' · ')})` : ''
+
   if (successCount === 0 && rejectedCount > 0) {
     return {
       variant: 'danger',
-      message: `Upload failed: ${rejectedCount} road${rejectedCount !== 1 ? 's' : ''} rejected`,
+      message: `Upload failed: ${rejectedCount} section${rejectedCount !== 1 ? 's' : ''} rejected`,
     }
   }
 
@@ -48,18 +57,18 @@ function buildUploadToast(res) {
   if (rejectedCount > 0) {
     return {
       variant: 'warning',
-      message: `${successCount} road${successCount !== 1 ? 's' : ''} uploaded · ${rejectedCount} rejected`,
+      message: `${successCount} section${successCount !== 1 ? 's' : ''} uploaded · ${rejectedCount} rejected${warningSuffix}`,
     }
   }
   if (parts.length <= 1) {
     return {
-      variant: 'success',
-      message: `${successCount} road${successCount !== 1 ? 's' : ''} uploaded`,
+      variant: res.warning_groups?.length > 0 ? 'warning' : 'success',
+      message: `${successCount} section${successCount !== 1 ? 's' : ''} uploaded${warningSuffix}`,
     }
   }
   return {
-    variant: 'success',
-    message: `Upload complete: ${parts.join(', ')}`,
+    variant: res.warning_groups?.length > 0 ? 'warning' : 'success',
+    message: `Upload complete: ${parts.join(', ')}${warningSuffix}`,
   }
 }
 
@@ -248,7 +257,7 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
     setError('')
     setUploading(true)
     try {
-      // Parses and validates only -- nothing is saved yet. Road IDs that
+      // Parses and validates only -- nothing is saved yet. Section IDs that
       // collide with an existing road come back as `duplicates`; everything
       // else is a clean `new_roads` entry that will just go straight in.
       const preview = await previewUpload(file)
@@ -443,6 +452,12 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
                 <li key={c}>{c}</li>
               ))}
             </ul>
+            <a className="required-columns-template-link" href="/api/roads/template" download>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 16V4m0 12-4-4m4 4 4-4M4 18v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Download blank template
+            </a>
           </div>
         </div>
       </div>

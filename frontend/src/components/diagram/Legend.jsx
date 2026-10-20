@@ -1,8 +1,7 @@
 import { SURFACE_SWATCHES } from '../../utils/surfaceSwatches'
 
 const ITEMS = [
-  { label: 'UNPAVED', swatch: SURFACE_SWATCHES.unpaved },
-  { label: 'PAVED', swatch: SURFACE_SWATCHES.paved },
+  { label: 'CONCRETE', swatch: SURFACE_SWATCHES.concrete },
   { label: 'ASPHALT', swatch: SURFACE_SWATCHES.asphalt },
   { label: 'GRAVEL', swatch: SURFACE_SWATCHES.gravel },
 ]

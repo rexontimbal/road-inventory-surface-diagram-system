@@ -41,16 +41,21 @@ class GuestMergeResult(BaseModel):
 
 
 class RoadSummary(BaseModel):
-    road_id: str
+    section_id: str
     road_name: str
+    classification: str | None = None
+    deo: str | None = None
+    ld: str | None = None
 
 
 class SegmentOut(BaseModel):
     seq_no: int
     start_station: str
     end_station: str
-    start_m: int
-    end_m: int
+    start_m: float
+    end_m: float
+    length_m: float
+    irregular_km_post: bool
     num_lanes: int
     surface_type: str
     shoulder_left: str
@@ -58,19 +63,27 @@ class SegmentOut(BaseModel):
 
 
 class RoadDetail(BaseModel):
-    road_id: str
+    section_id: str
     road_name: str
-    total_length_m: int
+    classification: str | None = None
+    deo: str | None = None
+    ld: str | None = None
+    total_length_m: float
     segments: list[SegmentOut]
 
 
 class SegmentRecord(BaseModel):
     id: int
     index: int
-    road_id: str
+    section_id: str
     road_name: str
+    classification: str | None = None
+    deo: str | None = None
+    ld: str | None = None
     start_station: str
     end_station: str
+    length_m: float
+    irregular_km_post: bool
     num_lanes: int
     surface_type: str
     shoulder_left: str
@@ -92,20 +105,35 @@ class RowErrorOut(BaseModel):
     message: str
 
 
+class RowWarningOut(BaseModel):
+    row: int
+    field: str
+    message: str
+    kind: str
+
+
+class WarningGroupOut(BaseModel):
+    kind: str
+    label: str
+    count: int
+
+
 class RoadRejectionOut(BaseModel):
-    road_id: str
+    section_id: str
     errors: list[RowErrorOut]
 
 
 class RoadImportedOut(BaseModel):
-    road_id: str
+    section_id: str
     road_name: str
     segment_count: int
     action: Literal["added", "replaced", "up_to_date"] = "added"
+    warnings: list[RowWarningOut] = []
+    warning_groups: list[WarningGroupOut] = []
 
 
 class RoadSkippedOut(BaseModel):
-    road_id: str
+    section_id: str
     road_name: str
 
 
@@ -116,26 +144,30 @@ class UploadResult(BaseModel):
     total_rows_processed: int
     ignored_columns: list[str]
     log_id: int | None = None
+    # Grouped across every imported section, for one summary line in the
+    # upload-result toast ("51 irregular km post · 184 gaps/overlaps · 1
+    # blank shoulder") instead of one line per row.
+    warning_groups: list[WarningGroupOut] = []
 
 
 class RoadPreviewNew(BaseModel):
-    road_id: str
+    section_id: str
     road_name: str
     segment_count: int
-    total_length_m: int
+    total_length_m: float
 
 
 class RoadPreviewDuplicate(BaseModel):
-    road_id: str
+    section_id: str
     existing_road_name: str
     new_road_name: str
     name_changed: bool
     existing_segment_count: int
-    existing_total_length_m: int
+    existing_total_length_m: float
     existing_updated_at: str
     existing_source_file: str | None
     new_segment_count: int
-    new_total_length_m: int
+    new_total_length_m: float
 
 
 class UploadPreview(BaseModel):
@@ -158,12 +190,13 @@ class UploadCancelIn(BaseModel):
 
 
 class LogRoadDetail(BaseModel):
-    road_id: str
+    section_id: str
     road_name: str
     action: Literal["added", "replaced", "kept_existing", "up_to_date", "rejected", "deleted", "edited"]
     segment_count: int | None = None
     change_summary: str | None = None
     rejection_reasons: list[str] = []
+    warning_groups: list[WarningGroupOut] = []
 
 
 class UploadLogOut(BaseModel):
@@ -226,16 +259,17 @@ class UploadLogPage(BaseModel):
 
 
 class RoadSummaryStat(BaseModel):
-    road_id: str
+    section_id: str
     road_name: str
-    total_length_m: int
-    asphalt_length_m: int
+    deo: str | None = None
+    total_length_m: float
+    asphalt_length_m: float
     pct: int
 
 
 class NetworkSummary(BaseModel):
-    total_length_m: int
-    asphalt_length_m: int
+    total_length_m: float
+    asphalt_length_m: float
     pct: int
     roads: list[RoadSummaryStat]
 
@@ -251,10 +285,12 @@ BACKUP_VERSION = 1
 
 class BackupSegment(BaseModel):
     seq_no: int
-    start_station_raw: str
-    end_station_raw: str
-    start_m: int
-    end_m: int
+    start_text: str
+    end_text: str
+    start_m: float
+    end_m: float
+    length_m: float
+    irregular_km_post: bool
     num_lanes: int
     surface_type: str
     shoulder_left: str
@@ -262,13 +298,16 @@ class BackupSegment(BaseModel):
 
 
 class BackupRoad(BaseModel):
-    road_id: str
+    section_id: str
     road_name: str
+    classification: str | None = None
+    deo: str | None = None
+    ld: str | None = None
     updated_at: str
     uploaded_at: str | None = None
     source_file: str | None = None
     segment_count: int
-    total_length_m: int
+    total_length_m: float
     segments: list[BackupSegment]
 
 

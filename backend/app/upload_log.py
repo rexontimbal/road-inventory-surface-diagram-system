@@ -104,8 +104,17 @@ def write_log_entry(
     return entry
 
 
+def _normalize_detail(d: dict) -> dict:
+    """Log entries written before the road_id -> section_id rename stored
+    their detail dicts with the old key -- translate on read so historical
+    log entries keep displaying instead of failing LogRoadDetail validation."""
+    if "section_id" not in d and "road_id" in d:
+        d = {**d, "section_id": d["road_id"]}
+    return d
+
+
 def entry_to_out(entry: UploadLogEntry) -> UploadLogOut:
-    details = json.loads(entry.details_json or "[]")
+    details = [_normalize_detail(d) for d in json.loads(entry.details_json or "[]")]
     return UploadLogOut(
         id=entry.id,
         timestamp=entry.timestamp,
@@ -156,7 +165,11 @@ def _matches_filters(
             haystack = [entry.file_name or ""] + [
                 v
                 for d in details
-                for v in (d.get("road_id", ""), d.get("road_name", ""), d.get("change_summary") or "")
+                for v in (
+                    d.get("section_id") or d.get("road_id", ""),
+                    d.get("road_name", ""),
+                    d.get("change_summary") or "",
+                )
             ]
             if not any(s in h.lower() for h in haystack):
                 return False
@@ -218,7 +231,7 @@ def export_log_csv(db, *, scope, search=None, action=None, date_range=None, by_u
             "File",
             "By",
             "By Email",
-            "Road ID",
+            "Section ID",
             "Road Name",
             "Action",
             "Segments",
@@ -239,7 +252,7 @@ def export_log_csv(db, *, scope, search=None, action=None, date_range=None, by_u
                     entry.file_name or "",
                     by_name,
                     entry.actor_email or "",
-                    d.get("road_id", ""),
+                    d.get("section_id") or d.get("road_id", ""),
                     d.get("road_name", ""),
                     d.get("action", ""),
                     d.get("segment_count", ""),

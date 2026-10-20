@@ -99,11 +99,11 @@ function parseEditFileName(fileName) {
 
 function sourceLabelShort(entry) {
   if (entry.kind === 'edit') {
-    const roadId = entry.details[0]?.road_id || parseEditFileName(entry.file_name)?.roadId || ''
+    const roadId = entry.details[0]?.section_id || parseEditFileName(entry.file_name)?.roadId || ''
     return `Inline edit · ${roadId}`
   }
   if (entry.kind === 'delete') {
-    const roadId = entry.details[0]?.road_id || ''
+    const roadId = entry.details[0]?.section_id || ''
     return `Deleted · ${roadId}`
   }
   return formatFileCell(entry)
@@ -113,14 +113,14 @@ function sourceLabelFull(entry) {
   if (entry.kind === 'edit') {
     const parsed = parseEditFileName(entry.file_name)
     const d = entry.details[0]
-    const roadId = d?.road_id || parsed?.roadId || ''
+    const roadId = d?.section_id || parsed?.roadId || ''
     const roadName = d?.road_name ? ` ${d.road_name}` : ''
     const stations = parsed ? ` · Sta. ${parsed.start} – ${parsed.end}` : ''
     return `Inline edit — ${roadId}${roadName}${stations}`
   }
   if (entry.kind === 'delete') {
     const d = entry.details[0]
-    return `Deleted — ${d?.road_id || ''}${d?.road_name ? ` ${d.road_name}` : ''}`
+    return `Deleted — ${d?.section_id || ''}${d?.road_name ? ` ${d.road_name}` : ''}`
   }
   const parts = [formatFileCell(entry)]
   const size = formatFileSize(entry.file_size)
@@ -452,7 +452,7 @@ export default function UploadHistoryModal({ onClose, triggerRef, initialExpande
             <input
               type="text"
               className="history-search"
-              placeholder="Search file name, Road ID, or field…"
+              placeholder="Search file name, Section ID, or field…"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
             />
@@ -605,9 +605,9 @@ export default function UploadHistoryModal({ onClose, triggerRef, initialExpande
                                     <span className="history-detail-panel-value">{sourceLabelFull(entry)}</span>
                                   </div>
                                   <div className="history-detail-panel-row">
-                                    <span className="history-detail-panel-label">Road</span>
+                                    <span className="history-detail-panel-label">Section</span>
                                     <span className="history-detail-panel-value">
-                                      <span className="mono">{entry.details[0]?.road_id}</span>
+                                      <span className="mono">{entry.details[0]?.section_id}</span>
                                       {entry.details[0]?.road_name ? ` ${entry.details[0].road_name}` : ''}
                                     </span>
                                   </div>
@@ -648,8 +648,8 @@ export default function UploadHistoryModal({ onClose, triggerRef, initialExpande
                                     <p className="history-no-detail">No road changes recorded for this entry.</p>
                                   )}
                                   {entry.details.map((d, i) => (
-                                    <div key={`${d.road_id}-${i}`} className="history-detail-row">
-                                      <span className="mono history-detail-id">{d.road_id}</span>
+                                    <div key={`${d.section_id}-${i}`} className="history-detail-row">
+                                      <span className="mono history-detail-id">{d.section_id}</span>
                                       <span className="history-detail-name">{d.road_name}</span>
                                       <span className={`upload-summary-badge upload-summary-badge-${ACTION_BADGE_CLASS[d.action]}`}>
                                         {ACTION_LABELS[d.action]}
@@ -660,6 +660,11 @@ export default function UploadHistoryModal({ onClose, triggerRef, initialExpande
                                         </span>
                                       )}
                                       {d.change_summary && <span className="history-change-summary">{d.change_summary}</span>}
+                                      {d.warning_groups?.length > 0 && (
+                                        <span className="history-warning-groups">
+                                          {d.warning_groups.map((g) => `${g.count} ${g.label}`).join(' · ')}
+                                        </span>
+                                      )}
                                       {d.rejection_reasons.length > 0 && (
                                         <ul className="history-rejection-reasons">
                                           {d.rejection_reasons.map((r, ri) => (

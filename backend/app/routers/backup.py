@@ -43,17 +43,19 @@ def _prune_pending_restores():
 
 @router.get("/export", response_model=BackupExport)
 def export_backup(db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
-    roads = apply_scope(db.query(Road), Road, scope).order_by(Road.road_id).all()
+    roads = apply_scope(db.query(Road), Road, scope).order_by(Road.section_id).all()
     backup_roads: list[BackupRoad] = []
     total_segments = 0
     for road in roads:
         segments = [
             BackupSegment(
                 seq_no=seg.seq_no,
-                start_station_raw=seg.start_station_raw,
-                end_station_raw=seg.end_station_raw,
+                start_text=seg.start_text,
+                end_text=seg.end_text,
                 start_m=seg.start_m,
                 end_m=seg.end_m,
+                length_m=seg.length_m,
+                irregular_km_post=seg.irregular_km_post,
                 num_lanes=seg.num_lanes,
                 surface_type=seg.surface_type,
                 shoulder_left=seg.shoulder_left,
@@ -64,8 +66,11 @@ def export_backup(db: Session = Depends(get_db), scope: Scope = Depends(get_scop
         total_segments += len(segments)
         backup_roads.append(
             BackupRoad(
-                road_id=road.road_id,
+                section_id=road.section_id,
                 road_name=road.road_name,
+                classification=road.classification,
+                deo=road.deo,
+                ld=road.ld,
                 updated_at=road.updated_at,
                 uploaded_at=road.uploaded_at,
                 source_file=road.source_file,
@@ -103,17 +108,17 @@ def restore_preview(body: RestorePreviewIn, db: Session = Depends(get_db), scope
     _PENDING_RESTORES[token] = (backup, time.time() + _PENDING_TTL_SECONDS)
 
     existing_by_key = {
-        road.road_id.strip().lower(): road for road in apply_scope(db.query(Road), Road, scope).all()
+        road.section_id.strip().lower(): road for road in apply_scope(db.query(Road), Road, scope).all()
     }
 
     new_roads: list[RoadPreviewNew] = []
     duplicates: list[RoadPreviewDuplicate] = []
     for br in backup.roads:
-        existing = existing_by_key.get(br.road_id.strip().lower())
+        existing = existing_by_key.get(br.section_id.strip().lower())
         if existing is None:
             new_roads.append(
                 RoadPreviewNew(
-                    road_id=br.road_id,
+                    section_id=br.section_id,
                     road_name=br.road_name,
                     segment_count=br.segment_count,
                     total_length_m=br.total_length_m,
@@ -122,7 +127,7 @@ def restore_preview(body: RestorePreviewIn, db: Session = Depends(get_db), scope
         else:
             duplicates.append(
                 RoadPreviewDuplicate(
-                    road_id=br.road_id,
+                    section_id=br.section_id,
                     existing_road_name=existing.road_name,
                     new_road_name=br.road_name,
                     name_changed=existing.road_name.strip().lower() != br.road_name.strip().lower(),
@@ -167,7 +172,7 @@ def restore_commit(body: RestoreCommitIn, db: Session = Depends(get_db), scope: 
     # memory from this query, so reading them later is safe even after a
     # bulk delete below (we never touch the .segments relationship on them).
     existing_roads = {
-        road.road_id.strip().lower(): road for road in apply_scope(db.query(Road), Road, scope).all()
+        road.section_id.strip().lower(): road for road in apply_scope(db.query(Road), Road, scope).all()
     }
     pre_existing_keys = set(existing_roads.keys())
 
@@ -183,15 +188,15 @@ def restore_commit(body: RestoreCommitIn, db: Session = Depends(get_db), scope: 
     log_details: list[dict] = []
 
     for br in backup.roads:
-        key = br.road_id.strip().lower()
+        key = br.section_id.strip().lower()
         existed_before = key in pre_existing_keys
-        action = body.decisions.get(br.road_id, "replace") if body.mode == "merge" else "replace"
+        action = body.decisions.get(br.section_id, "replace") if body.mode == "merge" else "replace"
 
         if body.mode == "merge" and existed_before and action == "keep":
             kept += 1
             log_details.append(
                 {
-                    "road_id": br.road_id,
+                    "section_id": br.section_id,
                     "road_name": br.road_name,
                     "action": "kept_existing",
                     "segment_count": existing_roads[key].segment_count,
@@ -203,12 +208,15 @@ def restore_commit(body: RestoreCommitIn, db: Session = Depends(get_db), scope: 
         if body.mode == "merge" and existed_before and existing_roads[key].uploaded_at:
             uploaded_at = existing_roads[key].uploaded_at
 
-        apply_scope(db.query(RoadSegment), RoadSegment, scope).filter(RoadSegment.road_id == br.road_id).delete()
-        apply_scope(db.query(Road), Road, scope).filter(Road.road_id == br.road_id).delete()
+        apply_scope(db.query(RoadSegment), RoadSegment, scope).filter(RoadSegment.section_id == br.section_id).delete()
+        apply_scope(db.query(Road), Road, scope).filter(Road.section_id == br.section_id).delete()
 
         road = Road(
-            road_id=br.road_id,
+            section_id=br.section_id,
             road_name=br.road_name,
+            classification=br.classification,
+            deo=br.deo,
+            ld=br.ld,
             updated_at=now,
             uploaded_at=uploaded_at,
             source_file=br.source_file,
@@ -220,12 +228,14 @@ def restore_commit(body: RestoreCommitIn, db: Session = Depends(get_db), scope: 
         for seg in br.segments:
             db.add(
                 RoadSegment(
-                    road_id=br.road_id,
+                    section_id=br.section_id,
                     seq_no=seg.seq_no,
-                    start_station_raw=seg.start_station_raw,
-                    end_station_raw=seg.end_station_raw,
+                    start_text=seg.start_text,
+                    end_text=seg.end_text,
                     start_m=seg.start_m,
                     end_m=seg.end_m,
+                    length_m=seg.length_m,
+                    irregular_km_post=seg.irregular_km_post,
                     num_lanes=seg.num_lanes,
                     surface_type=seg.surface_type,
                     shoulder_left=seg.shoulder_left,
@@ -243,7 +253,7 @@ def restore_commit(body: RestoreCommitIn, db: Session = Depends(get_db), scope: 
             row_action = "added"
         log_details.append(
             {
-                "road_id": br.road_id,
+                "section_id": br.section_id,
                 "road_name": br.road_name,
                 "action": row_action,
                 "segment_count": br.segment_count,

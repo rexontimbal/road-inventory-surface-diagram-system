@@ -16,7 +16,9 @@ async function handleResponse(res) {
 
 function buildSegmentsParams(filters = {}, sort = {}) {
   const params = new URLSearchParams()
-  if (filters.roadId) params.set('road_id', filters.roadId)
+  if (filters.sectionId) params.set('section_id', filters.sectionId)
+  if (filters.district) params.set('district', filters.district)
+  if (filters.classification) params.set('classification', filters.classification)
   if (filters.status) params.set('status', filters.status)
   if (filters.surfaceType) params.set('surface_type', filters.surfaceType)
   if (sort.sortBy) {
@@ -88,13 +90,13 @@ export async function fetchRoadsList() {
   return handleResponse(res)
 }
 
-export async function fetchRoadDetail(roadId) {
-  const res = await fetch(`${BASE}/${encodeURIComponent(roadId)}`)
+export async function fetchRoadDetail(sectionId) {
+  const res = await fetch(`${BASE}/${encodeURIComponent(sectionId)}`)
   return handleResponse(res)
 }
 
-export async function deleteRoad(roadId) {
-  const res = await fetch(`${BASE}/${encodeURIComponent(roadId)}`, { method: 'DELETE' })
+export async function deleteRoad(sectionId) {
+  const res = await fetch(`${BASE}/${encodeURIComponent(sectionId)}`, { method: 'DELETE' })
   return handleResponse(res)
 }
 

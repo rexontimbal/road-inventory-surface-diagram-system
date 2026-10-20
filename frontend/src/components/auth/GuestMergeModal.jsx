@@ -9,7 +9,7 @@ import { commitGuestMerge, discardGuestData, previewGuestMerge } from '../../api
 /**
  * Shown right after a guest with existing data signs in. "Move to my
  * account" reuses UploadConflictModal for the per-road Replace/Keep choice
- * when a guest road_id already exists in the shared workspace -- same
+ * when a guest section_id already exists in the shared workspace -- same
  * component, same decisions shape, as a normal upload conflict.
  */
 export default function GuestMergeModal({ onDone }) {

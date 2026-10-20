@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import Pagination from './Pagination'
 import CustomSelect from '../common/CustomSelect'
 import { editSegment, getSegmentsExportUrl } from '../../api/roads'
-import { SURFACE_SWATCHES } from '../../utils/surfaceSwatches'
+import { SHOULDER_SWATCHES, SURFACE_SWATCHES } from '../../utils/surfaceSwatches'
 import { showToast } from '../common/DialogProvider'
 
 // Matches .app-header-spacer in App.css (the fixed app header's height).
@@ -37,20 +37,47 @@ function SortIcon({ active, dir }) {
   )
 }
 
-const SURFACE_TYPE_OPTIONS = ['unpaved', 'paved', 'gravel', 'asphalt']
+function IrregularIcon() {
+  return (
+    <span
+      className="irregular-icon"
+      title="Irregular km post spacing, length excluded from totals"
+      aria-label="Irregular km post spacing, length excluded from totals"
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path
+          d="M12 9v4m0 4h.01M10.3 3.9 2.6 17.5a1.5 1.5 0 0 0 1.3 2.3h16.2a1.5 1.5 0 0 0 1.3-2.3L13.7 3.9a1.5 1.5 0 0 0-2.6 0Z"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </span>
+  )
+}
+
+const SURFACE_TYPE_OPTIONS = ['concrete', 'asphalt', 'gravel']
 const SURFACE_EDIT_OPTIONS = SURFACE_TYPE_OPTIONS.map((s) => ({
   value: s,
   label: s.charAt(0).toUpperCase() + s.slice(1),
 }))
+const SHOULDER_TYPE_OPTIONS = ['gravel', 'concrete', 'asphalt', 'earth', 'none']
+const SHOULDER_EDIT_OPTIONS = SHOULDER_TYPE_OPTIONS.map((s) => ({
+  value: s,
+  label: s === 'none' ? 'None' : s.charAt(0).toUpperCase() + s.slice(1),
+}))
 
-function renderSurfaceOption(o) {
-  return (
+function renderSwatchOption(swatchMap) {
+  return (o) => (
     <span className="custom-select-surface-option">
-      <span className="custom-select-surface-swatch" style={SURFACE_SWATCHES[o.value]} />
+      <span className="custom-select-surface-swatch" style={swatchMap[o.value]} />
       {o.label}
     </span>
   )
 }
+const renderSurfaceOption = renderSwatchOption(SURFACE_SWATCHES)
+const renderShoulderOption = renderSwatchOption(SHOULDER_SWATCHES)
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
@@ -69,12 +96,13 @@ const STATUS_OPTIONS = [
 // widen them) get a plain CSS min-width instead -- see App.css.
 const COLUMNS = [
   { label: '#', key: null },
-  { label: 'ROAD ID', key: 'road_id' },
+  { label: 'Section ID', key: 'section_id' },
   { label: 'Road Name', key: 'road_name' },
-  { label: 'Start Station', key: 'start_station' },
-  { label: 'End Station', key: 'end_station' },
-  { label: 'Number of Lanes', key: 'num_lanes' },
-  { label: 'Surface Type', key: 'surface_type' },
+  { label: 'Start', key: 'start_station' },
+  { label: 'End', key: 'end_station' },
+  { label: 'Length (m)', key: 'length_m' },
+  { label: 'Lanes', key: 'num_lanes' },
+  { label: 'Surface', key: 'surface_type' },
   { label: 'Left Shoulder', key: 'shoulder_left' },
   { label: 'Right Shoulder', key: 'shoulder_right' },
   { label: 'Status', key: 'status' },
@@ -85,6 +113,8 @@ export default function RoadInventoryTable({
   segmentsPage,
   onPageChange,
   roads,
+  districts,
+  classifications,
   filters,
   onFilterChange,
   sort,
@@ -92,7 +122,13 @@ export default function RoadInventoryTable({
   onSegmentEdited,
 }) {
   const records = segmentsPage?.records || []
-  const hasActiveFilters = !!(filters.roadId || filters.status || filters.surfaceType)
+  const hasActiveFilters = !!(
+    filters.sectionId ||
+    filters.district ||
+    filters.classification ||
+    filters.status ||
+    filters.surfaceType
+  )
 
   const [editingId, setEditingId] = useState(null)
   const [draft, setDraft] = useState(null)
@@ -112,9 +148,26 @@ export default function RoadInventoryTable({
     setTableScrolledOver(el.scrollLeft + el.clientWidth < el.scrollWidth - 1)
   }
 
-  const roadOptions = [
-    { value: '', label: 'All roads' },
-    ...roads.map((r) => ({ value: r.road_id, label: `${r.road_id} — ${r.road_name}`, roadName: r.road_name })),
+  // Section filter only lists sections within the currently-chosen District
+  // filter (if any) -- same "District narrows Section" cascade as "2. Select
+  // Section" in the sidebar.
+  const sectionsForFilter = filters.district ? roads.filter((r) => (r.deo || '') === filters.district) : roads
+  const sectionOptions = [
+    { value: '', label: 'All sections' },
+    ...sectionsForFilter.map((r) => ({
+      value: r.section_id,
+      label: `${r.section_id} — ${r.road_name}`,
+      roadName: r.road_name,
+      classification: r.classification,
+    })),
+  ]
+  const districtOptions = [
+    { value: '', label: 'All districts' },
+    ...districts.map((d) => ({ value: d.deo, label: d.deo, ld: d.ld, count: d.count })),
+  ]
+  const classificationOptions = [
+    { value: '', label: 'All classifications' },
+    ...classifications.map((c) => ({ value: c, label: c })),
   ]
   const surfaceOptions = [
     { value: '', label: 'All surface types' },
@@ -122,11 +175,19 @@ export default function RoadInventoryTable({
   ]
 
   function updateFilter(key, value) {
-    onFilterChange({ ...filters, [key]: value })
+    const next = { ...filters, [key]: value }
+    // Changing District invalidates a Section filter from a different district.
+    if (key === 'district') {
+      const stillValid = next.sectionId
+        ? roads.some((r) => r.section_id === next.sectionId && (r.deo || '') === value)
+        : true
+      if (!stillValid) next.sectionId = ''
+    }
+    onFilterChange(next)
   }
 
   function clearFilters() {
-    onFilterChange({ roadId: '', status: '', surfaceType: '' })
+    onFilterChange({ sectionId: '', district: '', classification: '', status: '', surfaceType: '' })
   }
 
   // Manual scrollLeft/scrollTop math instead of el.scrollIntoView() -- this
@@ -217,10 +278,10 @@ export default function RoadInventoryTable({
     try {
       await editSegment(original.id, fields)
       cancelEdit()
-      onSegmentEdited?.(original.road_id)
+      onSegmentEdited?.(original.section_id)
       showToast({
         variant: 'success',
-        message: `${original.road_id} segment updated (${original.start_station}–${original.end_station})`,
+        message: `${original.section_id} segment updated (${original.start_station}–${original.end_station})`,
         actionLabel: 'Undo',
         duration: 8000,
         onAction: async () => {
@@ -231,8 +292,8 @@ export default function RoadInventoryTable({
               shoulder_left: original.shoulder_left,
               shoulder_right: original.shoulder_right,
             })
-            onSegmentEdited?.(original.road_id)
-            showToast({ variant: 'info', message: `${original.road_id} segment reverted` })
+            onSegmentEdited?.(original.section_id)
+            showToast({ variant: 'info', message: `${original.section_id} segment reverted` })
           } catch (err) {
             showToast({ variant: 'danger', message: `Undo failed: ${err.message}` })
           }
@@ -260,6 +321,14 @@ export default function RoadInventoryTable({
     return sort.sortDir === 'asc' ? 'ascending' : 'descending'
   }
 
+  function sectionTooltip(r) {
+    const parts = []
+    if (r.classification) parts.push(`Classification: ${r.classification}`)
+    if (r.deo) parts.push(`DEO: ${r.deo}`)
+    if (r.ld) parts.push(`LD: ${r.ld}`)
+    return parts.join('\n')
+  }
+
   return (
     <div className="panel inventory-table">
       <div className="panel-header-row">
@@ -272,28 +341,68 @@ export default function RoadInventoryTable({
       </div>
 
       <div className="filter-bar">
-        <div className="filter-field filter-field-road">
-          <span>Road</span>
+        <div className="filter-field filter-field-district">
+          <span>District</span>
           <CustomSelect
             size="sm"
-            value={filters.roadId}
-            onChange={(v) => updateFilter('roadId', v)}
-            options={roadOptions}
-            ariaLabel="Filter by road"
+            value={filters.district}
+            onChange={(v) => updateFilter('district', v)}
+            options={districtOptions}
+            ariaLabel="Filter by district"
+            disabled={districts.length === 0}
+            searchable
+            searchPlaceholder="Search district (DEO)…"
+            getSearchText={(o) => `${o.label} ${o.ld || ''}`}
+            renderOption={(o) =>
+              o.value === '' ? (
+                o.label
+              ) : (
+                <div className="custom-select-district-option">
+                  <div className="custom-select-district-main">
+                    <span className="custom-select-district-name">{o.label}</span>
+                    {o.ld && <span className="custom-select-district-ld">{o.ld}</span>}
+                  </div>
+                  <span className="custom-select-district-count">{o.count}</span>
+                </div>
+              )
+            }
+          />
+        </div>
+        <div className="filter-field filter-field-section">
+          <span>Section</span>
+          <CustomSelect
+            size="sm"
+            value={filters.sectionId}
+            onChange={(v) => updateFilter('sectionId', v)}
+            options={sectionOptions}
+            ariaLabel="Filter by section"
             disabled={roads.length === 0}
             searchable
-            searchPlaceholder="Search road ID or name…"
+            searchPlaceholder="Search section ID or name…"
             getSearchText={(o) => o.label}
             renderOption={(o) =>
               o.value === '' ? (
                 o.label
               ) : (
                 <div className="custom-select-road-option">
-                  <span className="custom-select-road-id">{o.value}</span>
+                  <div className="custom-select-road-option-head">
+                    <span className="custom-select-road-id">{o.value}</span>
+                    {o.classification && <span className="classification-badge">{o.classification}</span>}
+                  </div>
                   <span className="custom-select-road-name">{o.roadName}</span>
                 </div>
               )
             }
+          />
+        </div>
+        <div className="filter-field filter-field-narrow">
+          <span>Classification</span>
+          <CustomSelect
+            size="sm"
+            value={filters.classification}
+            onChange={(v) => updateFilter('classification', v)}
+            options={classificationOptions}
+            ariaLabel="Filter by classification"
           />
         </div>
         <div className="filter-field filter-field-narrow">
@@ -394,15 +503,24 @@ export default function RoadInventoryTable({
               const isEditing = editingId === r.id
               return (
                 <tr
-                  key={`${r.road_id}-${r.index}`}
+                  key={`${r.section_id}-${r.index}`}
                   className={isEditing ? 'editing-row' : ''}
                   onKeyDown={isEditing ? (e) => handleRowKeyDown(e, r) : undefined}
                 >
                   <td>{r.index}</td>
-                  <td>{r.road_id}</td>
+                  <td title={sectionTooltip(r)}>{r.section_id}</td>
                   <td title={r.road_name}>{r.road_name}</td>
                   <td title="Edit stations via Excel upload.">{r.start_station}</td>
                   <td title="Edit stations via Excel upload.">{r.end_station}</td>
+                  <td>
+                    {r.irregular_km_post ? (
+                      <span className="length-cell-irregular">
+                        <IrregularIcon />0
+                      </span>
+                    ) : (
+                      Math.round(r.length_m).toLocaleString()
+                    )}
+                  </td>
                   <td>
                     {isEditing ? (
                       <input
@@ -439,9 +557,9 @@ export default function RoadInventoryTable({
                         size="sm"
                         value={draft.shoulder_left}
                         onChange={(v) => setDraft((d) => ({ ...d, shoulder_left: v }))}
-                        options={SURFACE_EDIT_OPTIONS}
+                        options={SHOULDER_EDIT_OPTIONS}
                         ariaLabel="Left shoulder"
-                        renderOption={renderSurfaceOption}
+                        renderOption={renderShoulderOption}
                         triggerClassName="inline-edit-select"
                       />
                     ) : (
@@ -454,9 +572,9 @@ export default function RoadInventoryTable({
                         size="sm"
                         value={draft.shoulder_right}
                         onChange={(v) => setDraft((d) => ({ ...d, shoulder_right: v }))}
-                        options={SURFACE_EDIT_OPTIONS}
+                        options={SHOULDER_EDIT_OPTIONS}
                         ariaLabel="Right shoulder"
-                        renderOption={renderSurfaceOption}
+                        renderOption={renderShoulderOption}
                         triggerClassName="inline-edit-select"
                       />
                     ) : (

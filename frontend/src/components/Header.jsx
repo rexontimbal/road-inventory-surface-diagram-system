@@ -11,7 +11,7 @@ const EXPAND_BELOW_Y = 20
 
 const HOW_TO_USE_STEPS = [
   { title: 'Upload', detail: 'Upload your road inventory Excel file in "1. Upload Excel File".' },
-  { title: 'Select road', detail: 'Pick a Road ID from "2. Select Road" to load its segments.' },
+  { title: 'Select section', detail: 'Pick a District, then a Section ID from "2. Select Section" to load its segments.' },
   { title: 'Set range', detail: 'Adjust the Start/End Station and diagram settings in "3. Diagram Settings".' },
   { title: 'Generate', detail: 'Click "Generate Road Surface Diagram" to draw the strip map.' },
   { title: 'Print / Export', detail: 'Use "Print / PDF" or "Export PNG" above the diagram to save it.' },
@@ -30,7 +30,7 @@ function formatLastUpload(date) {
 }
 
 const KEYBOARD_SHORTCUTS = [
-  { keys: '/', detail: 'Focus the Road filter' },
+  { keys: '/', detail: 'Focus the Section filter' },
   { keys: 'G', detail: 'Generate the diagram (when enabled)' },
   { keys: 'F', detail: 'Open the diagram fullscreen (when generated)' },
   { keys: 'U', detail: 'Open Choose Excel File' },
@@ -147,7 +147,7 @@ const Header = forwardRef(function Header(
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <path d="M6 19 11 5m2 0 5 14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
-                  {summary.roads.length} road{summary.roads.length !== 1 ? 's' : ''}
+                  {summary.roads.length} section{summary.roads.length !== 1 ? 's' : ''}
                 </span>
                 <span className="header-stat-chip">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">

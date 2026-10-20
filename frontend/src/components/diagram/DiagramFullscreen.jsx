@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { formatStation } from '../../utils/chainage'
+import { formatStationRange } from '../../utils/chainage'
 import Legend from './Legend'
 import { useModalLayer } from '../common/useModalLayer'
 import { useDevicePixelRatio } from '../../utils/useDevicePixelRatio'
@@ -275,16 +275,16 @@ export default function DiagramFullscreen({ road, completion, onClose, onPrint, 
       style={{ zIndex: zIndex ?? 3000 }}
       role="dialog"
       aria-modal="true"
-      aria-label={`${road.roadDetail.road_id} fullscreen diagram`}
+      aria-label={`${road.roadDetail.section_id} fullscreen diagram`}
     >
       <div className="fullscreen-topbar">
         <div className="fullscreen-topbar-left">
           <div className="fullscreen-road-id-row">
-            <span className="mono fullscreen-road-id">{road.roadDetail.road_id}</span>
+            <span className="mono fullscreen-road-id">{road.roadDetail.section_id}</span>
             <span className="fullscreen-road-name">{road.roadDetail.road_name}</span>
             {road.range && (
               <span className="fullscreen-station-range">
-                Sta. {formatStation(road.range.startM)} – {formatStation(road.range.endM)}
+                {formatStationRange(road.roadDetail, road.range)}
               </span>
             )}
           </div>
@@ -364,6 +364,10 @@ export default function DiagramFullscreen({ road, completion, onClose, onPrint, 
             <span>{tooltip.segment.start_station} &ndash; {tooltip.segment.end_station}</span>
           </div>
           <div className="tooltip-row">
+            <span>Length</span>
+            <span>{Math.round(tooltip.segment.length_m).toLocaleString()} m</span>
+          </div>
+          <div className="tooltip-row">
             <span>Lanes</span>
             <span>{tooltip.segment.num_lanes}</span>
           </div>
@@ -375,6 +379,9 @@ export default function DiagramFullscreen({ road, completion, onClose, onPrint, 
             <span>Shoulder L / R</span>
             <span>{tooltip.segment.shoulder_left} / {tooltip.segment.shoulder_right}</span>
           </div>
+          {tooltip.segment.irregular_km_post && (
+            <div className="tooltip-irregular">⚠ Irregular km post</div>
+          )}
         </div>
       )}
     </div>

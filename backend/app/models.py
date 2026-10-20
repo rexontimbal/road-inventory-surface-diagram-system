@@ -1,6 +1,8 @@
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Column,
+    Float,
     ForeignKeyConstraint,
     Index,
     Integer,
@@ -12,35 +14,48 @@ from sqlalchemy.orm import relationship
 
 from app.db import Base
 
-SURFACE_TYPES = ("unpaved", "paved", "gravel", "asphalt")
+# Main pavement surface, straight from DPWH's "Surface type" column.
+SURFACE_TYPES = ("concrete", "asphalt", "gravel")
+# Shoulder surface -- a superset of SURFACE_TYPES: shoulders can additionally
+# be unpaved earth or have no shoulder at all ("none", which blank cells and
+# the literal text "None" both normalize to).
+SHOULDER_TYPES = ("gravel", "concrete", "asphalt", "earth", "none")
 
 # Sentinel used for owner_id on every "workspace" row instead of NULL. SQL
 # UNIQUE/PRIMARY KEY constraints treat every NULL as distinct from every
-# other NULL, so two workspace rows with the same road_id and owner_id=NULL
+# other NULL, so two workspace rows with the same section_id and owner_id=NULL
 # would NOT violate uniqueness -- '' (never a real guest_id, which is always
-# a hex token) makes the composite key actually enforce one road_id per
+# a hex token) makes the composite key actually enforce one section_id per
 # scope. Scope.owner_id itself stays None at the API/app layer (app/scope.py
 # translates between the two at the DB boundary).
 WORKSPACE_OWNER_ID = ""
 
 
 class Road(Base):
+    """One DPWH road section (what the source file calls "Section ID")."""
+
     __tablename__ = "roads"
 
-    # Composite primary key -- road_id is NOT globally unique on its own,
+    # Composite primary key -- section_id is NOT globally unique on its own,
     # only unique within one scope. Without owner_type/owner_id in the key,
     # a guest uploading the same sample file as the shared workspace (an
-    # entirely expected, common case) would collide on road_id and corrupt
+    # entirely expected, common case) would collide on section_id and corrupt
     # or block each other's data instead of staying isolated.
-    road_id = Column(String, primary_key=True)
+    section_id = Column(String, primary_key=True)
     owner_type = Column(String, primary_key=True, default="workspace", server_default="workspace")
     owner_id = Column(String, primary_key=True, default=WORKSPACE_OWNER_ID, server_default=WORKSPACE_OWNER_ID)
     road_name = Column(String, nullable=False)
+    # DPWH classification/office columns -- one value per section (validated
+    # consistent across every row of a section at import time; a section
+    # with 2+ distinct DEO or LD values is rejected rather than guessed at).
+    classification = Column(String, nullable=True)
+    deo = Column(String, nullable=True)
+    ld = Column(String, nullable=True)
     updated_at = Column(String, nullable=False)
     uploaded_at = Column(String, nullable=True)
     source_file = Column(String, nullable=True)
     segment_count = Column(Integer, nullable=False, default=0)
-    total_length_m = Column(Integer, nullable=False, default=0)
+    total_length_m = Column(Float, nullable=False, default=0)
 
     segments = relationship(
         "RoadSegment",
@@ -54,14 +69,22 @@ class RoadSegment(Base):
     __tablename__ = "road_segments"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    road_id = Column(String, nullable=False)
+    section_id = Column(String, nullable=False)
     owner_type = Column(String, nullable=False, default="workspace", server_default="workspace")
     owner_id = Column(String, nullable=False, default=WORKSPACE_OWNER_ID, server_default=WORKSPACE_OWNER_ID)
     seq_no = Column(Integer, nullable=False)
-    start_station_raw = Column(String, nullable=False)
-    end_station_raw = Column(String, nullable=False)
-    start_m = Column(Integer, nullable=False)
-    end_m = Column(Integer, nullable=False)
+    # Original station text exactly as it appeared in the source file (e.g.
+    # "K1259 + (-166)", "Chainage 105", "254") -- kept for display since the
+    # parsed start_m/end_m lose the station's original notation.
+    start_text = Column(String, nullable=False)
+    end_text = Column(String, nullable=False)
+    start_m = Column(Float, nullable=False)
+    end_m = Column(Float, nullable=False)
+    # end_m - start_m, except when that would be <= 0 (a bad km post in the
+    # source data) -- then this is forced to 0 so totals aren't thrown off,
+    # and irregular_km_post is set instead of rejecting the row.
+    length_m = Column(Float, nullable=False)
+    irregular_km_post = Column(Boolean, nullable=False, default=False)
     num_lanes = Column(Integer, nullable=False)
     surface_type = Column(String, nullable=False)
     shoulder_left = Column(String, nullable=False)
@@ -72,15 +95,15 @@ class RoadSegment(Base):
 
     __table_args__ = (
         ForeignKeyConstraint(
-            ["road_id", "owner_type", "owner_id"],
-            ["roads.road_id", "roads.owner_type", "roads.owner_id"],
+            ["section_id", "owner_type", "owner_id"],
+            ["roads.section_id", "roads.owner_type", "roads.owner_id"],
             ondelete="CASCADE",
         ),
-        UniqueConstraint("road_id", "owner_type", "owner_id", "seq_no", name="uq_road_seq"),
+        UniqueConstraint("section_id", "owner_type", "owner_id", "seq_no", name="uq_section_seq"),
         CheckConstraint(f"surface_type IN {SURFACE_TYPES}", name="ck_surface_type"),
-        CheckConstraint(f"shoulder_left IN {SURFACE_TYPES}", name="ck_shoulder_left"),
-        CheckConstraint(f"shoulder_right IN {SURFACE_TYPES}", name="ck_shoulder_right"),
-        Index("idx_segments_road_start", "road_id", "owner_type", "owner_id", "start_m"),
+        CheckConstraint(f"shoulder_left IN {SHOULDER_TYPES}", name="ck_shoulder_left"),
+        CheckConstraint(f"shoulder_right IN {SHOULDER_TYPES}", name="ck_shoulder_right"),
+        Index("idx_segments_section_start", "section_id", "owner_type", "owner_id", "start_m"),
     )
 
 
@@ -108,7 +131,7 @@ class UploadLogEntry(Base):
     rejected_count = Column(Integer, nullable=False, default=0)
     deleted_count = Column(Integer, nullable=False, default=0)
     edited_count = Column(Integer, nullable=False, default=0)
-    # JSON-encoded list of per-road detail dicts: road_id, road_name, action,
+    # JSON-encoded list of per-road detail dicts: section_id, road_name, action,
     # segment_count, change_summary, rejection_reasons. Kept as one blob
     # rather than a child table -- it's always read/written as a whole with
     # its parent entry, never queried independently.

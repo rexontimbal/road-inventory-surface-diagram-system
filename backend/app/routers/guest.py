@@ -66,18 +66,18 @@ def guest_merge_preview(request: Request, db: Session = Depends(get_db)):
         return GuestMergePreview(new_roads=[], duplicates=[])
 
     workspace_by_key = {
-        road.road_id.strip().lower(): road
+        road.section_id.strip().lower(): road
         for road in db.query(Road).filter(Road.owner_type == "workspace", Road.owner_id == WORKSPACE_OWNER_ID).all()
     }
 
     new_roads: list[RoadPreviewNew] = []
     duplicates: list[RoadPreviewDuplicate] = []
     for road in _guest_roads(db, guest_id):
-        existing = workspace_by_key.get(road.road_id.strip().lower())
+        existing = workspace_by_key.get(road.section_id.strip().lower())
         if existing is None:
             new_roads.append(
                 RoadPreviewNew(
-                    road_id=road.road_id,
+                    section_id=road.section_id,
                     road_name=road.road_name,
                     segment_count=road.segment_count,
                     total_length_m=road.total_length_m,
@@ -86,7 +86,7 @@ def guest_merge_preview(request: Request, db: Session = Depends(get_db)):
         else:
             duplicates.append(
                 RoadPreviewDuplicate(
-                    road_id=road.road_id,
+                    section_id=road.section_id,
                     existing_road_name=existing.road_name,
                     new_road_name=road.road_name,
                     name_changed=existing.road_name.strip().lower() != road.road_name.strip().lower(),
@@ -114,7 +114,7 @@ def guest_merge_commit(body: GuestMergeCommitIn, request: Request, db: Session =
 
     if guest_id:
         workspace_by_key = {
-            road.road_id.strip().lower(): road
+            road.section_id.strip().lower(): road
             for road in db.query(Road)
             .filter(Road.owner_type == "workspace", Road.owner_id == WORKSPACE_OWNER_ID)
             .all()
@@ -122,21 +122,21 @@ def guest_merge_commit(body: GuestMergeCommitIn, request: Request, db: Session =
         log_details: list[dict] = []
 
         for road in _guest_roads(db, guest_id):
-            key = road.road_id.strip().lower()
+            key = road.section_id.strip().lower()
             existing = workspace_by_key.get(key)
-            decision = body.decisions.get(road.road_id, "replace")
+            decision = body.decisions.get(road.section_id, "replace")
 
             if existing is not None and decision == "keep":
                 kept += 1
                 log_details.append(
-                    {"road_id": road.road_id, "road_name": road.road_name, "action": "kept_existing"}
+                    {"section_id": road.section_id, "road_name": road.road_name, "action": "kept_existing"}
                 )
                 continue
 
             segments = list(road.segments)
             if existing is not None:
                 db.query(RoadSegment).filter(
-                    RoadSegment.road_id == existing.road_id,
+                    RoadSegment.section_id == existing.section_id,
                     RoadSegment.owner_type == "workspace",
                     RoadSegment.owner_id == WORKSPACE_OWNER_ID,
                 ).delete()
@@ -148,8 +148,11 @@ def guest_merge_commit(body: GuestMergeCommitIn, request: Request, db: Session =
                 row_action = "added"
 
             new_road = Road(
-                road_id=road.road_id,
+                section_id=road.section_id,
                 road_name=road.road_name,
+                classification=road.classification,
+                deo=road.deo,
+                ld=road.ld,
                 updated_at=road.updated_at,
                 uploaded_at=road.uploaded_at,
                 source_file=road.source_file,
@@ -162,12 +165,14 @@ def guest_merge_commit(body: GuestMergeCommitIn, request: Request, db: Session =
             for seg in segments:
                 db.add(
                     RoadSegment(
-                        road_id=seg.road_id,
+                        section_id=seg.section_id,
                         seq_no=seg.seq_no,
-                        start_station_raw=seg.start_station_raw,
-                        end_station_raw=seg.end_station_raw,
+                        start_text=seg.start_text,
+                        end_text=seg.end_text,
                         start_m=seg.start_m,
                         end_m=seg.end_m,
+                        length_m=seg.length_m,
+                        irregular_km_post=seg.irregular_km_post,
                         num_lanes=seg.num_lanes,
                         surface_type=seg.surface_type,
                         shoulder_left=seg.shoulder_left,
@@ -179,7 +184,7 @@ def guest_merge_commit(body: GuestMergeCommitIn, request: Request, db: Session =
                 )
             log_details.append(
                 {
-                    "road_id": road.road_id,
+                    "section_id": road.section_id,
                     "road_name": road.road_name,
                     "action": row_action,
                     "segment_count": road.segment_count,

@@ -1,10 +1,12 @@
-import { formatStation, parseStationInput } from '../../utils/chainage'
+import { parseDpwhStation } from '../../utils/chainage'
 import CustomSelect from '../common/CustomSelect'
 
 const INTERVAL_OPTIONS = [
+  { label: '100 meters', value: 100 },
   { label: '500 meters', value: 500 },
   { label: '1 kilometer', value: 1000 },
   { label: '2 kilometers', value: 2000 },
+  { label: '5 kilometers', value: 5000 },
 ]
 
 const STATIONS_PER_LINE_OPTIONS = [5, 10, 15, 20]
@@ -20,31 +22,37 @@ export default function DiagramSettingsPanel({
   onExpand,
 }) {
   const hasRoad = !!(road && road.segments.length)
-  const roadMinM = hasRoad ? road.segments[0].start_m : null
-  const roadMaxM = hasRoad ? road.segments[road.segments.length - 1].end_m : null
+  const firstSeg = hasRoad ? road.segments[0] : null
+  const lastSeg = hasRoad ? road.segments[road.segments.length - 1] : null
+  const roadMinM = hasRoad ? firstSeg.start_m : null
+  const roadMaxM = hasRoad ? lastSeg.end_m : null
+  // The section's natural extremes, shown verbatim -- this is the actual
+  // original DPWH text (e.g. "K1259 + (-166)"), not a synthesized value, so
+  // it's always exact regardless of station notation style.
+  const sectionRangeText = hasRoad ? `${firstSeg.start_station} – ${lastSeg.end_station}` : ''
 
-  const startM = parseStationInput(range.startRaw)
-  const endM = parseStationInput(range.endRaw)
+  const startM = parseDpwhStation(range.startRaw)
+  const endM = parseDpwhStation(range.endRaw)
 
   let rangeError = ''
   if (hasRoad) {
     if (range.startRaw.trim() && startM === null) {
-      rangeError = 'Use format like 12+500'
+      rangeError = 'Use format like K1260 + 500'
     } else if (range.endRaw.trim() && endM === null) {
-      rangeError = 'Use format like 12+500'
+      rangeError = 'Use format like K1260 + 500'
     } else if (startM !== null && endM !== null && startM >= endM) {
       rangeError = 'Start must be before End'
     } else if (startM !== null && (startM < roadMinM || startM > roadMaxM)) {
-      rangeError = `Start must be within road range (${formatStation(roadMinM)} – ${formatStation(roadMaxM)})`
+      rangeError = `Start must be within the section range (${sectionRangeText})`
     } else if (endM !== null && (endM < roadMinM || endM > roadMaxM)) {
-      rangeError = `End must be within road range (${formatStation(roadMinM)} – ${formatStation(roadMaxM)})`
+      rangeError = `End must be within the section range (${sectionRangeText})`
     }
   }
 
   const rangeValid = hasRoad && startM !== null && endM !== null && !rangeError
 
   function handleReset() {
-    onRangeChange({ startRaw: formatStation(roadMinM), endRaw: formatStation(roadMaxM) })
+    onRangeChange({ startRaw: firstSeg.start_station, endRaw: lastSeg.end_station })
   }
 
   return (
@@ -68,7 +76,7 @@ export default function DiagramSettingsPanel({
             className={rangeError ? 'field-invalid' : ''}
             value={range.startRaw}
             disabled={!hasRoad}
-            placeholder="0+000"
+            placeholder="K1260 + 500"
             onChange={(e) => onRangeChange({ ...range, startRaw: e.target.value })}
           />
         </label>
@@ -79,18 +87,16 @@ export default function DiagramSettingsPanel({
             className={rangeError ? 'field-invalid' : ''}
             value={range.endRaw}
             disabled={!hasRoad}
-            placeholder="35+000"
+            placeholder="K1270 + 000"
             onChange={(e) => onRangeChange({ ...range, endRaw: e.target.value })}
           />
         </label>
       </div>
       {hasRoad && (
         <div className="range-helper-row">
-          <span className="range-helper-text">
-            Road range: {formatStation(roadMinM)} &ndash; {formatStation(roadMaxM)}
-          </span>
+          <span className="range-helper-text">Section range: {sectionRangeText}</span>
           <button type="button" className="range-reset-link" onClick={handleReset}>
-            Reset to full road
+            Reset to full section
           </button>
         </div>
       )}

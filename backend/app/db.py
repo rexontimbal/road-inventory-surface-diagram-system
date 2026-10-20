@@ -95,18 +95,225 @@ def _migrate_roads_to_owner_scoped_schema(conn):
     conn.exec_driver_sql("DROP TABLE roads_old")
 
 
+def _migrate_road_id_to_section_id(conn):
+    """Road's primary key column is renamed road_id -> section_id, and both
+    tables gain the new DPWH fields (classification/deo/ld on roads;
+    start_text/end_text/length_m/irregular_km_post on road_segments,
+    replacing start_station_raw/end_station_raw). The surface/shoulder CHECK
+    constraints also change vocabulary (old: unpaved/paved/gravel/asphalt;
+    new surface: concrete/asphalt/gravel; new shoulder: gravel/concrete/
+    asphalt/earth/none) -- SQLite can't ALTER a CHECK constraint in place, so
+    this rebuilds both tables from the current model metadata, same approach
+    as _migrate_roads_to_owner_scoped_schema above.
+
+    Existing rows keep their data: old surface/shoulder values are mapped
+    onto the closest new vocabulary (paved->concrete, unpaved->earth/gravel)
+    rather than dropped, since this is local dev/sample data predating the
+    real DPWH format, not something we can ask DPWH to re-classify."""
+    from app.models import Road, RoadSegment, WORKSPACE_OWNER_ID  # local import -- avoids a load-order cycle
+
+    conn.exec_driver_sql("ALTER TABLE roads RENAME TO roads_old")
+    conn.exec_driver_sql("ALTER TABLE road_segments RENAME TO road_segments_old")
+    conn.exec_driver_sql("DROP INDEX IF EXISTS idx_segments_road_start")
+    conn.exec_driver_sql("DROP INDEX IF EXISTS idx_segments_section_start")
+    conn.exec_driver_sql("DROP INDEX IF EXISTS uq_road_seq")
+    conn.exec_driver_sql("DROP INDEX IF EXISTS uq_section_seq")
+    Road.__table__.create(conn)
+    RoadSegment.__table__.create(conn)
+    conn.exec_driver_sql(
+        f"""
+        INSERT INTO roads (section_id, owner_type, owner_id, road_name, classification, deo, ld,
+                            updated_at, uploaded_at, source_file, segment_count, total_length_m)
+        SELECT road_id, owner_type, owner_id, road_name, NULL, NULL, NULL,
+               updated_at, uploaded_at, source_file, segment_count, total_length_m
+        FROM roads_old
+        """
+    )
+    conn.exec_driver_sql(
+        f"""
+        INSERT INTO road_segments (id, section_id, owner_type, owner_id, seq_no,
+                                    start_text, end_text, start_m, end_m, length_m,
+                                    irregular_km_post, num_lanes, surface_type,
+                                    shoulder_left, shoulder_right, source_row_number)
+        SELECT id, road_id, owner_type, owner_id, seq_no,
+               start_station_raw, end_station_raw, start_m, end_m,
+               MAX(end_m - start_m, 0), CASE WHEN end_m - start_m <= 0 THEN 1 ELSE 0 END,
+               num_lanes,
+               CASE surface_type WHEN 'paved' THEN 'concrete' WHEN 'unpaved' THEN 'gravel' ELSE surface_type END,
+               CASE shoulder_left WHEN 'paved' THEN 'concrete' WHEN 'unpaved' THEN 'earth' ELSE shoulder_left END,
+               CASE shoulder_right WHEN 'paved' THEN 'concrete' WHEN 'unpaved' THEN 'earth' ELSE shoulder_right END,
+               source_row_number
+        FROM road_segments_old
+        """
+    )
+    conn.exec_driver_sql("DROP TABLE road_segments_old")
+    conn.exec_driver_sql("DROP TABLE roads_old")
+
+
+def _pg_table_columns(conn, table: str) -> set[str]:
+    rows = conn.exec_driver_sql(
+        "SELECT column_name FROM information_schema.columns WHERE table_name = %s",
+        (table,),
+    ).fetchall()
+    return {row[0] for row in rows}
+
+
+def _pg_constraint_names(conn, table: str, contype: str) -> list[str]:
+    """contype: 'p' (primary key), 'f' (foreign key), 'u' (unique), 'c' (check).
+    Looked up by catalog query rather than hardcoded -- a constraint
+    SQLAlchemy/Postgres auto-named (no explicit `name=` in the old model)
+    can't be relied on to have a predictable name across however this
+    database was originally provisioned."""
+    rows = conn.exec_driver_sql(
+        "SELECT conname FROM pg_constraint WHERE conrelid = %s::regclass AND contype = %s",
+        (table, contype),
+    ).fetchall()
+    return [row[0] for row in rows]
+
+
+def _pg_migrate_roads_to_owner_scoped_schema(conn):
+    """Postgres equivalent of _migrate_roads_to_owner_scoped_schema above --
+    same end state (Road's primary key becomes (road_id, owner_type,
+    owner_id)), but Postgres's ALTER TABLE is flexible enough to do this
+    additively (add columns, swap the primary key, re-point road_segments'
+    foreign key/unique/index at the new composite key) instead of SQLite's
+    rename-rebuild-copy dance."""
+    from app.models import WORKSPACE_OWNER_ID  # local import -- avoids a load-order cycle
+
+    conn.exec_driver_sql("ALTER TABLE roads ADD COLUMN owner_type TEXT NOT NULL DEFAULT 'workspace'")
+    conn.exec_driver_sql(f"ALTER TABLE roads ADD COLUMN owner_id TEXT NOT NULL DEFAULT '{WORKSPACE_OWNER_ID}'")
+    for name in _pg_constraint_names(conn, "roads", "p"):
+        conn.exec_driver_sql(f'ALTER TABLE roads DROP CONSTRAINT "{name}"')
+    conn.exec_driver_sql("ALTER TABLE roads ADD PRIMARY KEY (road_id, owner_type, owner_id)")
+
+    conn.exec_driver_sql("ALTER TABLE road_segments ADD COLUMN owner_type TEXT NOT NULL DEFAULT 'workspace'")
+    conn.exec_driver_sql(
+        f"ALTER TABLE road_segments ADD COLUMN owner_id TEXT NOT NULL DEFAULT '{WORKSPACE_OWNER_ID}'"
+    )
+    for name in _pg_constraint_names(conn, "road_segments", "f"):
+        conn.exec_driver_sql(f'ALTER TABLE road_segments DROP CONSTRAINT "{name}"')
+    conn.exec_driver_sql(
+        "ALTER TABLE road_segments ADD CONSTRAINT road_segments_road_id_fkey "
+        "FOREIGN KEY (road_id, owner_type, owner_id) REFERENCES roads (road_id, owner_type, owner_id) "
+        "ON DELETE CASCADE"
+    )
+    for name in _pg_constraint_names(conn, "road_segments", "u"):
+        conn.exec_driver_sql(f'ALTER TABLE road_segments DROP CONSTRAINT "{name}"')
+    conn.exec_driver_sql(
+        "ALTER TABLE road_segments ADD CONSTRAINT uq_road_seq UNIQUE (road_id, owner_type, owner_id, seq_no)"
+    )
+    conn.exec_driver_sql("DROP INDEX IF EXISTS idx_segments_road_start")
+    conn.exec_driver_sql(
+        "CREATE INDEX idx_segments_road_start ON road_segments (road_id, owner_type, owner_id, start_m)"
+    )
+
+
+def _pg_migrate_road_id_to_section_id(conn):
+    """Postgres equivalent of _migrate_road_id_to_section_id above -- same
+    end state, but Postgres's ALTER TABLE ... RENAME COLUMN works directly
+    (it transparently updates every reference to that column -- primary key,
+    foreign key, indexes all keep working under their existing names), so
+    this is additive/renaming rather than SQLite's rename-rebuild-copy
+    dance. The CHECK constraints on surface_type/shoulder_left/
+    shoulder_right still can't be altered in place -- those are dropped and
+    re-added with the new vocabulary, after remapping existing values so
+    the new CHECK doesn't reject old rows (same mapping as SQLite: paved->
+    concrete, unpaved->gravel/earth)."""
+    from app.models import SHOULDER_TYPES, SURFACE_TYPES  # local import -- avoids a load-order cycle
+
+    conn.exec_driver_sql("ALTER TABLE roads RENAME COLUMN road_id TO section_id")
+    conn.exec_driver_sql("ALTER TABLE road_segments RENAME COLUMN road_id TO section_id")
+
+    conn.exec_driver_sql("ALTER TABLE roads ADD COLUMN classification TEXT")
+    conn.exec_driver_sql("ALTER TABLE roads ADD COLUMN deo TEXT")
+    conn.exec_driver_sql("ALTER TABLE roads ADD COLUMN ld TEXT")
+    conn.exec_driver_sql("ALTER TABLE roads ALTER COLUMN total_length_m TYPE DOUBLE PRECISION")
+
+    conn.exec_driver_sql("ALTER TABLE road_segments RENAME COLUMN start_station_raw TO start_text")
+    conn.exec_driver_sql("ALTER TABLE road_segments RENAME COLUMN end_station_raw TO end_text")
+    # Widened from Integer -- DPWH offsets can be decimal (e.g. "K1271 +
+    # 099.80"), which an Integer column would silently truncate.
+    conn.exec_driver_sql("ALTER TABLE road_segments ALTER COLUMN start_m TYPE DOUBLE PRECISION")
+    conn.exec_driver_sql("ALTER TABLE road_segments ALTER COLUMN end_m TYPE DOUBLE PRECISION")
+    conn.exec_driver_sql("ALTER TABLE road_segments ADD COLUMN length_m DOUBLE PRECISION")
+    conn.exec_driver_sql("ALTER TABLE road_segments ADD COLUMN irregular_km_post BOOLEAN")
+    conn.exec_driver_sql(
+        "UPDATE road_segments SET length_m = GREATEST(end_m - start_m, 0), "
+        "irregular_km_post = (end_m - start_m) <= 0"
+    )
+    conn.exec_driver_sql("ALTER TABLE road_segments ALTER COLUMN length_m SET NOT NULL")
+    conn.exec_driver_sql("ALTER TABLE road_segments ALTER COLUMN irregular_km_post SET NOT NULL")
+
+    # Old CHECK constraints must come off BEFORE remapping the data below --
+    # they still enforce the OLD vocabulary until dropped, so an UPDATE that
+    # writes 'concrete'/'earth' would itself violate them.
+    for name in _pg_constraint_names(conn, "road_segments", "c"):
+        conn.exec_driver_sql(f'ALTER TABLE road_segments DROP CONSTRAINT "{name}"')
+
+    conn.exec_driver_sql(
+        "UPDATE road_segments SET surface_type = CASE surface_type "
+        "WHEN 'paved' THEN 'concrete' WHEN 'unpaved' THEN 'gravel' ELSE surface_type END"
+    )
+    conn.exec_driver_sql(
+        "UPDATE road_segments SET shoulder_left = CASE shoulder_left "
+        "WHEN 'paved' THEN 'concrete' WHEN 'unpaved' THEN 'earth' ELSE shoulder_left END"
+    )
+    conn.exec_driver_sql(
+        "UPDATE road_segments SET shoulder_right = CASE shoulder_right "
+        "WHEN 'paved' THEN 'concrete' WHEN 'unpaved' THEN 'earth' ELSE shoulder_right END"
+    )
+    conn.exec_driver_sql(f"ALTER TABLE road_segments ADD CONSTRAINT ck_surface_type CHECK (surface_type IN {SURFACE_TYPES})")
+    conn.exec_driver_sql(
+        f"ALTER TABLE road_segments ADD CONSTRAINT ck_shoulder_left CHECK (shoulder_left IN {SHOULDER_TYPES})"
+    )
+    conn.exec_driver_sql(
+        f"ALTER TABLE road_segments ADD CONSTRAINT ck_shoulder_right CHECK (shoulder_right IN {SHOULDER_TYPES})"
+    )
+
+
+def _ensure_schema_postgres():
+    with engine.connect() as conn:
+        existing_cols = _pg_table_columns(conn, "roads")
+        if "source_file" not in existing_cols:
+            conn.exec_driver_sql("ALTER TABLE roads ADD COLUMN source_file TEXT")
+        if "uploaded_at" not in existing_cols:
+            conn.exec_driver_sql("ALTER TABLE roads ADD COLUMN uploaded_at TEXT")
+            conn.exec_driver_sql("UPDATE roads SET uploaded_at = updated_at WHERE uploaded_at IS NULL")
+        if "owner_type" not in existing_cols:
+            _pg_migrate_roads_to_owner_scoped_schema(conn)
+            existing_cols = _pg_table_columns(conn, "roads")
+        if "section_id" not in existing_cols:
+            _pg_migrate_road_id_to_section_id(conn)
+
+        log_cols = _pg_table_columns(conn, "upload_log")
+        if "edited_count" not in log_cols:
+            conn.exec_driver_sql("ALTER TABLE upload_log ADD COLUMN edited_count INTEGER NOT NULL DEFAULT 0")
+        if "owner_type" not in log_cols:
+            conn.exec_driver_sql("ALTER TABLE upload_log ADD COLUMN owner_type TEXT NOT NULL DEFAULT 'workspace'")
+            conn.exec_driver_sql("ALTER TABLE upload_log ADD COLUMN owner_id TEXT NOT NULL DEFAULT ''")
+        if "user_id" not in log_cols:
+            conn.exec_driver_sql("ALTER TABLE upload_log ADD COLUMN user_id INTEGER")
+            conn.exec_driver_sql("ALTER TABLE upload_log ADD COLUMN actor_name TEXT")
+            conn.exec_driver_sql("ALTER TABLE upload_log ADD COLUMN actor_email TEXT")
+            conn.exec_driver_sql("ALTER TABLE upload_log ADD COLUMN actor_avatar_url TEXT")
+
+        conn.commit()
+
+
 def ensure_schema():
     """Base.metadata.create_all only creates missing TABLES, not missing
     COLUMNS on a table that already exists -- so a column added to a model
-    after the live DB file was first created needs an explicit, additive
-    ALTER TABLE here. Safe to call on every startup: each column is only
-    added if it isn't already present.
+    after the live database was first created needs an explicit, additive
+    ALTER TABLE here. Safe to call on every startup: each column/constraint
+    change is only applied if it isn't already present.
 
-    SQLite-only: these patches exist because the local dev DB file has been
-    through several schema revisions over time. A Postgres DATABASE_URL
-    always starts from Base.metadata.create_all's fresh, fully-current
-    schema, so none of this historical backfill is needed there."""
+    Both branches patch the same sequence of historical revisions (owner-
+    scoped roads, then the road_id -> section_id/DPWH rename) up to the
+    current model -- SQLite and Postgres just need different DDL to get
+    there (SQLite can't ALTER a primary key or a CHECK constraint in place,
+    so those steps rebuild the table; Postgres supports both directly)."""
     if not IS_SQLITE:
+        _ensure_schema_postgres()
         return
     with engine.connect() as conn:
         existing_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(roads)").fetchall()}
@@ -119,6 +326,9 @@ def ensure_schema():
             conn.exec_driver_sql("UPDATE roads SET uploaded_at = updated_at WHERE uploaded_at IS NULL")
         if "owner_type" not in existing_cols:
             _migrate_roads_to_owner_scoped_schema(conn)
+            existing_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(roads)").fetchall()}
+        if "section_id" not in existing_cols:
+            _migrate_road_id_to_section_id(conn)
 
         log_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(upload_log)").fetchall()}
         if "edited_count" not in log_cols:

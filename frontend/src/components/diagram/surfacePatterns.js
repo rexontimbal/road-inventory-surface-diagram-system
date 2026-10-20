@@ -1,7 +1,8 @@
 export const SURFACE_COLORS = {
-  unpaved: '#FFFFFF',
-  paved: '#9E9E9E',
+  concrete: '#9E9E9E',
   asphalt: '#000000',
+  earth: '#C8A165',
+  none: '#FFFFFF',
 }
 
 const GRAVEL_TILE_SIZE = 8 // logical px -- the hatch's on-screen spacing, unchanged at any scale
@@ -57,13 +58,14 @@ export function fillForSurface(ctx, surfaceType, scale = 1) {
   return SURFACE_COLORS[surfaceType] || '#FF00FF' // magenta = unrecognized value, should never happen post-validation
 }
 
-// Subtle top-lit gradient for asphalt/paved cells only -- stays visually the
-// same hue as the flat legend swatch (so it still reads as "the same color"),
-// just with a light bevel for depth instead of a flat CAD fill. Unpaved and
-// gravel stay as their flat/pattern fill (matte dirt has no such sheen).
+// Subtle top-lit gradient for asphalt/concrete cells only -- stays visually
+// the same hue as the flat legend swatch (so it still reads as "the same
+// color"), just with a light bevel for depth instead of a flat CAD fill.
+// Earth/none/gravel stay as their flat/pattern fill (matte surfaces have no
+// such sheen).
 const GRADIENT_STOPS = {
   asphalt: ['#3a3a3a', '#000000'],
-  paved: ['#c4c4c4', '#9E9E9E'],
+  concrete: ['#c4c4c4', '#9E9E9E'],
 }
 
 export function fillForCell(ctx, surfaceType, x, y, w, h, scale = 1) {

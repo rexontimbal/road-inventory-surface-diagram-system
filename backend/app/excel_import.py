@@ -4,13 +4,18 @@ from io import BytesIO
 
 import openpyxl
 
-from app.chainage import ParsedRow, RowError, parse_chainage, validate_road_rows
+from app.chainage import ParsedRow, RowError, RowWarning, make_row, parse_station, validate_section_rows
 
 # Maps normalized (lowercased, whitespace-collapsed) header text -> internal field name.
-# Matches the confirmed two-row-header template: row 1 is decorative group labels
-# (STATION / SHOULDER), row 2 holds these actual column names.
+# Row 1 of the DPWH template is decorative group labels (STATION / SHOULDER);
+# this maps the real column names on row 2. Column O ("District Engineering
+# Office (DEO)" / "Legislative District (LD)" stray legend text) and any
+# other unrecognized column are simply ignored.
 REQUIRED_COLUMNS = {
-    "road id": "road_id",
+    "section id": "section_id",
+    "classification": "classification",
+    "deo": "deo",
+    "ld": "ld",
     "road name": "road_name",
     "start": "start_station",
     "end": "end_station",
@@ -20,7 +25,7 @@ REQUIRED_COLUMNS = {
     "right": "shoulder_right",
 }
 
-HEADER_ROW = 2  # 1-based Excel row holding actual column names (row 1 is group labels)
+HEADER_SEARCH_MAX_ROW = 10  # how far down to look for the "Section ID" header row
 
 
 class TemplateError(Exception):
@@ -35,27 +40,47 @@ def _is_blank(value) -> bool:
     return value is None or (isinstance(value, str) and value.strip() == "")
 
 
+def _find_header_row(ws) -> int:
+    """Finds the row holding the real column names by scanning for a cell
+    that reads "Section ID" -- the DPWH template's row 1 is a merged
+    group-header row (STATION / SHOULDER) above it, but that layout isn't
+    guaranteed, so we detect the header row by content instead of a fixed
+    row number."""
+    for row_cells in ws.iter_rows(min_row=1, max_row=min(HEADER_SEARCH_MAX_ROW, ws.max_row)):
+        for cell in row_cells:
+            if _normalize_header(cell.value) == "section id":
+                return cell.row
+    raise TemplateError('Could not find the header row (a cell reading "Section ID") in the first '
+                         f"{HEADER_SEARCH_MAX_ROW} rows")
+
+
 @dataclass
-class RoadImportPlan:
-    road_id: str
+class SectionImportPlan:
+    section_id: str
     road_name: str
+    classification: str
+    deo: str
+    ld: str
     segments: list[ParsedRow] = field(default_factory=list)
+    warnings: list[RowWarning] = field(default_factory=list)
 
     @property
-    def total_length_m(self) -> int:
-        return max((s.end_m for s in self.segments), default=0)
+    def total_length_m(self) -> float:
+        # Sum, not max(end_m): real sections aren't necessarily contiguous
+        # from 0, and an irregular (length <= 0) segment contributes 0.
+        return sum(s.length_m for s in self.segments)
 
 
 @dataclass
-class RoadRejection:
-    road_id: str
+class SectionRejection:
+    section_id: str
     errors: list[RowError]
 
 
 @dataclass
 class ImportResult:
-    accepted: list[RoadImportPlan]
-    rejected: list[RoadRejection]
+    accepted: list[SectionImportPlan]
+    rejected: list[SectionRejection]
     total_rows_processed: int
     ignored_columns: list[str]
 
@@ -67,7 +92,8 @@ def parse_upload(file_bytes: bytes) -> ImportResult:
     except Exception as exc:  # noqa: BLE001 - surfaced as a template error to the client
         raise TemplateError(f"Could not read Excel file: {exc}") from exc
 
-    header_cells = next(ws.iter_rows(min_row=HEADER_ROW, max_row=HEADER_ROW))
+    header_row = _find_header_row(ws)
+    header_cells = next(ws.iter_rows(min_row=header_row, max_row=header_row))
     found_headers = [c.value for c in header_cells if c.value is not None]
     normalized_to_col_idx: dict[str, int] = {}
     for c in header_cells:
@@ -76,7 +102,7 @@ def parse_upload(file_bytes: bytes) -> ImportResult:
 
     missing = [req for req in REQUIRED_COLUMNS if req not in normalized_to_col_idx]
     if missing:
-        missing_display = [c.upper() if c in ("left", "right") else c.title() for c in missing]
+        missing_display = [c.upper() if c in ("left", "right", "deo", "ld") else c.title() for c in missing]
         raise TemplateError(
             f"Missing required column(s): {', '.join(missing_display)}. "
             f"Columns found in file: {found_headers}"
@@ -90,41 +116,41 @@ def parse_upload(file_bytes: bytes) -> ImportResult:
         str(c.value) for c in header_cells if c.value is not None and c.column not in used_col_indices
     ]
 
-    rows_by_road: dict[str, list[ParsedRow]] = {}
-    errors_by_road: dict[str, list[RowError]] = {}
+    rows_by_section: dict[str, list[ParsedRow]] = {}
+    errors_by_section: dict[str, list[RowError]] = {}
     total_rows = 0
 
     def cell(row_cells, field_name):
         return row_cells[col_idx[field_name] - 1].value
 
-    for row_cells in ws.iter_rows(min_row=HEADER_ROW + 1):
+    def text(row_cells, field_name) -> str:
+        value = cell(row_cells, field_name)
+        return "" if _is_blank(value) else str(value).strip()
+
+    for row_cells in ws.iter_rows(min_row=header_row + 1):
         row_number = row_cells[0].row
         if all(c.value is None for c in row_cells):
             continue
         total_rows += 1
 
-        road_id_val = cell(row_cells, "road_id")
-        road_id = "" if _is_blank(road_id_val) else str(road_id_val).strip()
-        if not road_id:
-            errors_by_road.setdefault("(blank Road ID)", []).append(
-                RowError(row_number, "ROAD ID", "Road ID is blank")
+        section_id = text(row_cells, "section_id")
+        if not section_id:
+            errors_by_section.setdefault("(blank Section ID)", []).append(
+                RowError(row_number, "Section ID", "Section ID is blank")
             )
             continue
 
-        road_name_val = cell(row_cells, "road_name")
-        road_name = "" if _is_blank(road_name_val) else str(road_name_val).strip()
-
-        row_errors = errors_by_road.setdefault(road_id, [])
+        row_errors = errors_by_section.setdefault(section_id, [])
 
         start_raw = cell(row_cells, "start_station")
         end_raw = cell(row_cells, "end_station")
         try:
-            start_m = parse_chainage(start_raw)
+            start = parse_station(start_raw)
         except ValueError as exc:
             row_errors.append(RowError(row_number, "Start", str(exc)))
             continue
         try:
-            end_m = parse_chainage(end_raw)
+            end = parse_station(end_raw)
         except ValueError as exc:
             row_errors.append(RowError(row_number, "End", str(exc)))
             continue
@@ -134,50 +160,63 @@ def parse_upload(file_bytes: bytes) -> ImportResult:
             num_lanes = int(num_lanes_raw)
         except (TypeError, ValueError):
             row_errors.append(
-                RowError(
-                    row_number,
-                    "Number of Lanes",
-                    f"'{num_lanes_raw}' is not a valid integer",
-                )
+                RowError(row_number, "Number of Lanes", f"'{num_lanes_raw}' is not a valid integer")
             )
             continue
 
         def _norm_surface(value) -> str:
-            return "" if _is_blank(value) else str(value).strip().lower()
+            return "none" if _is_blank(value) else str(value).strip().lower()
 
-        parsed = ParsedRow(
+        parsed = make_row(
             row_number=row_number,
-            road_id=road_id,
-            road_name=road_name,
-            start_station_raw=str(start_raw).strip(),
-            end_station_raw=str(end_raw).strip(),
-            start_m=start_m,
-            end_m=end_m,
+            section_id=section_id,
+            road_name=text(row_cells, "road_name"),
+            classification=text(row_cells, "classification"),
+            deo=text(row_cells, "deo"),
+            ld=text(row_cells, "ld"),
+            start=start,
+            end=end,
             num_lanes=num_lanes,
             surface_type=_norm_surface(cell(row_cells, "surface_type")),
             shoulder_left=_norm_surface(cell(row_cells, "shoulder_left")),
             shoulder_right=_norm_surface(cell(row_cells, "shoulder_right")),
+            # Only a truly empty cell counts as "blank" -- the literal text
+            # "None" is a valid DPWH value (explicitly "no shoulder"), not
+            # missing data, even though both normalize to "none" above.
+            shoulder_left_was_blank=_is_blank(cell(row_cells, "shoulder_left")),
+            shoulder_right_was_blank=_is_blank(cell(row_cells, "shoulder_right")),
         )
-        rows_by_road.setdefault(road_id, []).append(parsed)
+        rows_by_section.setdefault(section_id, []).append(parsed)
 
-    accepted: list[RoadImportPlan] = []
-    rejected: list[RoadRejection] = []
+    accepted: list[SectionImportPlan] = []
+    rejected: list[SectionRejection] = []
 
-    all_road_ids = set(rows_by_road) | set(errors_by_road)
-    for road_id in all_road_ids:
-        rows = rows_by_road.get(road_id, [])
-        pre_errors = list(errors_by_road.get(road_id, []))
-        validation_errors = validate_road_rows(rows) if rows else []
+    all_section_ids = set(rows_by_section) | set(errors_by_section)
+    for section_id in all_section_ids:
+        rows = rows_by_section.get(section_id, [])
+        pre_errors = list(errors_by_section.get(section_id, []))
+        validation_errors, warnings = validate_section_rows(rows) if rows else ([], [])
         all_errors = pre_errors + validation_errors
 
         if all_errors:
-            rejected.append(RoadRejection(road_id=road_id, errors=all_errors))
+            rejected.append(SectionRejection(section_id=section_id, errors=all_errors))
             continue
 
         sorted_rows = sorted(rows, key=lambda r: r.start_m)
-        road_name = next((r.road_name for r in sorted_rows if r.road_name), road_id)
+        road_name = next((r.road_name for r in sorted_rows if r.road_name), section_id)
+        classification = next((r.classification for r in sorted_rows if r.classification), "")
+        deo = next((r.deo for r in sorted_rows if r.deo), "")
+        ld = next((r.ld for r in sorted_rows if r.ld), "")
         accepted.append(
-            RoadImportPlan(road_id=road_id, road_name=road_name, segments=sorted_rows)
+            SectionImportPlan(
+                section_id=section_id,
+                road_name=road_name,
+                classification=classification,
+                deo=deo,
+                ld=ld,
+                segments=sorted_rows,
+                warnings=warnings,
+            )
         )
 
     return ImportResult(

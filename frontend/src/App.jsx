@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Header, { openHowToUse } from './components/Header'
 import GuestNotice from './components/GuestNotice'
 import GuestMergeModal from './components/auth/GuestMergeModal'
 import UploadPanel from './components/sidebar/UploadPanel'
-import RoadSelectPanel from './components/sidebar/RoadSelectPanel'
+import SectionSelectPanel from './components/sidebar/SectionSelectPanel'
 import DiagramSettingsPanel from './components/sidebar/DiagramSettingsPanel'
 import RoadInventoryTable from './components/inventory/RoadInventoryTable'
 import NetworkSummaryBar from './components/inventory/NetworkSummaryBar'
@@ -15,7 +15,7 @@ import {
   fetchRoadsList,
   fetchSegmentsPage,
 } from './api/roads'
-import { formatStation, parseStationInput } from './utils/chainage'
+import { parseDpwhStation } from './utils/chainage'
 import { readUploadMeta, writeUploadMeta } from './utils/uploadMeta'
 import { fetchMe, signInWithGoogle, signOut } from './api/auth'
 import { fetchGuestStatus } from './api/guest'
@@ -24,6 +24,31 @@ import './App.css'
 
 const PAGE_SIZE = 10
 const NETWORK_SUMMARY_OPEN_KEY = 'ris.networkSummaryOpen'
+
+const EMPTY_TABLE_FILTERS = { sectionId: '', district: '', classification: '', status: '', surfaceType: '' }
+
+// Groups the flat /api/roads list into one entry per District (DEO), each
+// carrying its distinct LD value(s) and how many sections fall under it --
+// drives both "2. Select Section"'s District dropdown and the inventory
+// table's District filter, so the two never disagree on what a "district" is.
+function buildDistricts(roads) {
+  const map = new Map()
+  for (const r of roads) {
+    const key = r.deo || '(No District)'
+    if (!map.has(key)) map.set(key, { deo: key, lds: new Set(), count: 0 })
+    const entry = map.get(key)
+    if (r.ld) entry.lds.add(r.ld)
+    entry.count += 1
+  }
+  return [...map.values()]
+    .map((e) => ({ deo: e.deo, ld: [...e.lds].join(', '), count: e.count }))
+    .sort((a, b) => a.deo.localeCompare(b.deo))
+}
+
+function buildClassifications(roads) {
+  const set = new Set(roads.map((r) => r.classification).filter(Boolean))
+  return [...set].sort((a, b) => a.localeCompare(b))
+}
 
 function readStoredNetworkSummaryOpen() {
   try {
@@ -35,11 +60,12 @@ function readStoredNetworkSummaryOpen() {
 
 export default function App() {
   const [roads, setRoads] = useState([])
-  const [selectedRoadId, setSelectedRoadId] = useState('')
+  const [selectedDistrict, setSelectedDistrict] = useState('')
+  const [selectedSectionId, setSelectedSectionId] = useState('')
   const [roadDetail, setRoadDetail] = useState(null)
   const [segmentsPage, setSegmentsPage] = useState(null)
   const [tablePage, setTablePage] = useState(1)
-  const [tableFilters, setTableFilters] = useState({ roadId: '', status: '', surfaceType: '' })
+  const [tableFilters, setTableFilters] = useState(EMPTY_TABLE_FILTERS)
   const [tableSort, setTableSort] = useState({ sortBy: null, sortDir: 'asc' })
   const [networkSummary, setNetworkSummary] = useState(null)
   const [settings, setSettings] = useState({ stationIntervalM: 1000, stationsPerLine: 10 })
@@ -75,7 +101,8 @@ export default function App() {
   // selection, and network summary already on screen are for the OLD scope
   // and must be dropped, not just left stale underneath the new state.
   async function refreshAfterScopeChange() {
-    setSelectedRoadId('')
+    setSelectedDistrict('')
+    setSelectedSectionId('')
     setRoadDetail(null)
     setGeneratedRange(null)
     setHasGenerated(false)
@@ -169,10 +196,10 @@ export default function App() {
   }
 
   useEffect(() => {
-    document.title = selectedRoadId
-      ? `${selectedRoadId} · Road Inventory & Surface Diagram`
+    document.title = selectedSectionId
+      ? `${selectedSectionId} · Road Inventory & Surface Diagram`
       : 'Road Inventory & Surface Diagram System'
-  }, [selectedRoadId])
+  }, [selectedSectionId])
 
   useEffect(() => {
     refreshSegmentsPage(tablePage, tableFilters, tableSort)
@@ -194,7 +221,7 @@ export default function App() {
       switch (e.key) {
         case '/':
           e.preventDefault()
-          document.querySelector('.filter-field-road .custom-select-trigger')?.click()
+          document.querySelector('.filter-field-section .custom-select-trigger')?.click()
           break
         case 'g':
         case 'G':
@@ -225,12 +252,12 @@ export default function App() {
   }, [roadDetail, range])
 
   async function handleFilterChange(newFilters) {
-    // The ROAD filter and "2. Select Road" are kept in sync both ways: if
-    // this change came from the table's Road dropdown (or Clear filters),
-    // drive the same selection logic Select Road uses so the road detail,
-    // station range, and diagram state all stay consistent.
-    if (newFilters.roadId !== tableFilters.roadId) {
-      await handleSelectRoad(newFilters.roadId)
+    // The SECTION filter and "2. Select Section" are kept in sync both ways:
+    // if this change came from the table's Section dropdown (or Clear
+    // filters), drive the same selection logic Select Section uses so the
+    // road detail, station range, and diagram state all stay consistent.
+    if (newFilters.sectionId !== tableFilters.sectionId) {
+      await handleSelectSection(newFilters.sectionId)
     }
     setTableFilters(newFilters)
     setTablePage(1)
@@ -259,44 +286,44 @@ export default function App() {
     setUploadMeta(meta)
     writeUploadMeta(meta)
 
-    // The road currently loaded in "2. Select Road" may have just had its
-    // segments replaced -- refresh its detail so the station range/road name
-    // reflect the new data, but leave the already-drawn diagram alone (it's
-    // now stale) and tell the user to regenerate rather than silently
+    // The section currently loaded in "2. Select Section" may have just had
+    // its segments replaced -- refresh its detail so the station range/road
+    // name reflect the new data, but leave the already-drawn diagram alone
+    // (it's now stale) and tell the user to regenerate rather than silently
     // redrawing it out from under them.
     const wasReplaced = uploadResult.imported.some(
-      (r) => r.action === 'replaced' && r.road_id === selectedRoadId
+      (r) => r.action === 'replaced' && r.section_id === selectedSectionId
     )
     if (wasReplaced) {
-      const detail = await fetchRoadDetail(selectedRoadId)
+      const detail = await fetchRoadDetail(selectedSectionId)
       setRoadDetail(detail)
       if (detail.segments.length) {
-        const minM = detail.segments[0].start_m
-        const maxM = detail.segments[detail.segments.length - 1].end_m
-        setRange({ startRaw: formatStation(minM), endRaw: formatStation(maxM) })
+        const first = detail.segments[0]
+        const last = detail.segments[detail.segments.length - 1]
+        setRange({ startRaw: first.start_station, endRaw: last.end_station })
       }
       showToast({
         variant: 'info',
-        message: `${selectedRoadId} was updated. Regenerate the diagram to see changes.`,
+        message: `${selectedSectionId} was updated. Regenerate the diagram to see changes.`,
       })
     }
   }
 
-  async function handleSegmentEdited(roadId) {
+  async function handleSegmentEdited(sectionId) {
     // The edit already changed the DB; refetch the current page/sort/filter
     // view so the row reflects the saved values, plus the network summary
     // since surface_type edits change the asphalted %.
     await refreshSegmentsPage(tablePage, tableFilters, tableSort)
     await refreshSummary()
 
-    // If the edited road's diagram is the one currently on screen, refresh
+    // If the edited section's diagram is the one currently on screen, refresh
     // its detail (so regenerating draws the new data) but don't silently
     // redraw an already-generated diagram out from under the user.
-    if (roadId === selectedRoadId) {
-      const detail = await fetchRoadDetail(roadId)
+    if (sectionId === selectedSectionId) {
+      const detail = await fetchRoadDetail(sectionId)
       setRoadDetail(detail)
       if (hasGenerated) {
-        showToast({ variant: 'info', message: `${roadId} was updated. Regenerate the diagram to see changes.` })
+        showToast({ variant: 'info', message: `${sectionId} was updated. Regenerate the diagram to see changes.` })
       }
     }
   }
@@ -306,45 +333,64 @@ export default function App() {
     // full wipe-and-replace) -- rather than trying to cleverly preserve
     // whatever was selected/filtered before, reset to a clean state and
     // reload everything from scratch, same approach as "all roads deleted".
-    setSelectedRoadId('')
+    setSelectedDistrict('')
+    setSelectedSectionId('')
     setRoadDetail(null)
     setHasGenerated(false)
     setGeneratedRange(null)
     setRange({ startRaw: '', endRaw: '' })
-    const clearedFilters = { roadId: '', status: '', surfaceType: '' }
-    setTableFilters(clearedFilters)
+    setTableFilters(EMPTY_TABLE_FILTERS)
     setTablePage(1)
     await refreshRoads()
-    await refreshSegmentsPage(1, clearedFilters, tableSort)
+    await refreshSegmentsPage(1, EMPTY_TABLE_FILTERS, tableSort)
     await refreshSummary()
   }
 
-  async function handleSelectRoad(roadId) {
-    setSelectedRoadId(roadId)
+  // Selecting a section from ANY entry point (the "2. Select Section" Section
+  // ID dropdown, the table's Section filter, or a network-summary chip) goes
+  // through this one function -- it derives the section's District from the
+  // `roads` list so all three stay consistent without each caller having to
+  // know/pass it separately.
+  async function handleSelectSection(sectionId) {
+    const road = sectionId ? roads.find((r) => r.section_id === sectionId) : null
+    setSelectedSectionId(sectionId)
+    if (road) setSelectedDistrict(road.deo || '')
     setHasGenerated(false)
     setGeneratedRange(null)
-    // Keep the table's ROAD filter in sync when the road is picked from
-    // "2. Select Road" rather than from the table filter itself.
-    setTableFilters((f) => (f.roadId === roadId ? f : { ...f, roadId }))
+    // Keep the table's SECTION filter in sync when the section is picked from
+    // "2. Select Section" rather than from the table filter itself.
+    setTableFilters((f) => (f.sectionId === sectionId ? f : { ...f, sectionId }))
     setTablePage(1)
-    if (!roadId) {
+    if (!sectionId) {
       setRoadDetail(null)
       setRange({ startRaw: '', endRaw: '' })
       return
     }
-    const detail = await fetchRoadDetail(roadId)
+    const detail = await fetchRoadDetail(sectionId)
     setRoadDetail(detail)
     if (detail.segments.length) {
-      const minM = detail.segments[0].start_m
-      const maxM = detail.segments[detail.segments.length - 1].end_m
-      setRange({ startRaw: formatStation(minM), endRaw: formatStation(maxM) })
+      const first = detail.segments[0]
+      const last = detail.segments[detail.segments.length - 1]
+      setRange({ startRaw: first.start_station, endRaw: last.end_station })
     } else {
       setRange({ startRaw: '', endRaw: '' })
     }
   }
 
-  async function handleDeleteRoad(roadId) {
-    await deleteRoad(roadId)
+  // Changing the District dropdown invalidates a selected Section from a
+  // different (or no) district -- "2. Select Section"'s Section ID dropdown
+  // only ever lists the current district's sections, so a stale selection
+  // from before the change must be cleared, not silently kept.
+  function handleSelectDistrict(deo) {
+    setSelectedDistrict(deo)
+    const current = selectedSectionId ? roads.find((r) => r.section_id === selectedSectionId) : null
+    if (selectedSectionId && (!current || (current.deo || '') !== deo)) {
+      handleSelectSection('')
+    }
+  }
+
+  async function handleDeleteRoad(sectionId) {
+    await deleteRoad(sectionId)
 
     // Fetch the fresh list directly (rather than relying on the `roads`
     // state, which won't reflect this delete until the next render) so the
@@ -352,8 +398,8 @@ export default function App() {
     const freshRoads = await fetchRoadsList()
     setRoads(freshRoads)
 
-    if (roadId === selectedRoadId) {
-      setSelectedRoadId('')
+    if (sectionId === selectedSectionId) {
+      setSelectedSectionId('')
       setRoadDetail(null)
       setHasGenerated(false)
       setGeneratedRange(null)
@@ -361,15 +407,15 @@ export default function App() {
     }
 
     // Clear filters that no longer refer to anything real: all of them once
-    // no roads remain at all, or just the ROAD filter if only the road it
-    // was pointed at got deleted (other roads/filters are left alone).
-    const filteredRoadStillExists = freshRoads.some((r) => r.road_id === tableFilters.roadId)
+    // no roads remain at all, or just the SECTION filter if only the section
+    // it was pointed at got deleted (other filters are left alone).
+    const filteredSectionStillExists = freshRoads.some((r) => r.section_id === tableFilters.sectionId)
     const nextFilters =
       freshRoads.length === 0
-        ? { roadId: '', status: '', surfaceType: '' }
-        : filteredRoadStillExists
+        ? EMPTY_TABLE_FILTERS
+        : filteredSectionStillExists
         ? tableFilters
-        : { ...tableFilters, roadId: '' }
+        : { ...tableFilters, sectionId: '' }
     setTableFilters(nextFilters)
     setTablePage(1)
     await refreshSegmentsPage(1, nextFilters, tableSort)
@@ -378,20 +424,31 @@ export default function App() {
       setUploadMeta(null)
       writeUploadMeta(null)
     }
-    showToast({ variant: 'success', message: `Road ${roadId} deleted` })
+    showToast({ variant: 'success', message: `Section ${sectionId} deleted` })
   }
 
   function handleGenerate() {
     if (!roadDetail) return
-    const startM = parseStationInput(range.startRaw)
-    const endM = parseStationInput(range.endRaw)
+    const startM = parseDpwhStation(range.startRaw)
+    const endM = parseDpwhStation(range.endRaw)
     if (startM === null || endM === null || startM >= endM) return
-    setGeneratedRange({ startM, endM })
+    // startText/endText carry the literal typed-or-defaulted text through to
+    // the diagram -- range labels (progress bar, print header, fullscreen
+    // chip, export filename) show this verbatim rather than re-deriving a
+    // km post from startM/endM, which would silently drop a negative
+    // offset's reference point (see formatStationRange's doc comment).
+    setGeneratedRange({ startM, endM, startText: range.startRaw.trim(), endText: range.endRaw.trim() })
     setHasGenerated(true)
     setDiagramVersion((v) => v + 1)
   }
 
   const selectedRoadName = roadDetail?.road_name || ''
+  const districts = useMemo(() => buildDistricts(roads), [roads])
+  const classifications = useMemo(() => buildClassifications(roads), [roads])
+  const sectionsInSelectedDistrict = useMemo(
+    () => (selectedDistrict ? roads.filter((r) => (r.deo || '') === selectedDistrict) : []),
+    [roads, selectedDistrict]
+  )
 
   return (
     <div className="app-shell">
@@ -437,11 +494,17 @@ export default function App() {
             collapsed={sidebarCollapsed}
             onExpand={() => setSidebarCollapsed(false)}
           />
-          <RoadSelectPanel
-            roads={roads}
-            selectedRoadId={selectedRoadId}
-            onSelect={handleSelectRoad}
+          <SectionSelectPanel
+            districts={districts}
+            sections={sectionsInSelectedDistrict}
+            selectedDistrict={selectedDistrict}
+            onSelectDistrict={handleSelectDistrict}
+            selectedSectionId={selectedSectionId}
+            onSelectSection={handleSelectSection}
             roadName={selectedRoadName}
+            classification={roadDetail?.classification || ''}
+            deo={roadDetail?.deo || ''}
+            ld={roadDetail?.ld || ''}
             onDelete={handleDeleteRoad}
             collapsed={sidebarCollapsed}
             onExpand={() => setSidebarCollapsed(false)}
@@ -463,12 +526,14 @@ export default function App() {
             summary={networkSummary}
             open={networkSummaryOpen}
             onClose={() => networkSummaryOpen && toggleNetworkSummary()}
-            onSelectRoad={handleSelectRoad}
+            onSelectSection={handleSelectSection}
           />
           <RoadInventoryTable
             segmentsPage={segmentsPage}
             onPageChange={setTablePage}
             roads={roads}
+            districts={districts}
+            classifications={classifications}
             filters={tableFilters}
             onFilterChange={handleFilterChange}
             sort={tableSort}

@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { renderDiagram, renderSingleStrip, getNumStrips, getRowLabelLayout, getCanvasLogicalSize } from './diagramRenderer'
-import { formatStation } from '../../utils/chainage'
+import { formatFilenameRangeSuffix, formatStationRange } from '../../utils/chainage'
 import Legend from './Legend'
 import DiagramFullscreen from './DiagramFullscreen'
 import { showToast } from '../common/DialogProvider'
@@ -19,6 +19,7 @@ function computeCompletion(roadDetail, range) {
   let doneM = 0
   let totalM = 0
   for (const seg of roadDetail.segments) {
+    if (seg.irregular_km_post) continue // length 0, excluded from totals
     const clipStart = Math.max(seg.start_m, startM)
     const clipEnd = Math.min(seg.end_m, endM)
     if (clipEnd <= clipStart) continue
@@ -187,7 +188,7 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
 
   function rangeSuffix() {
     if (!road?.range) return ''
-    return `_Sta${formatStation(road.range.startM)}-${formatStation(road.range.endM)}`
+    return formatFilenameRangeSuffix(road.roadDetail, road.range)
   }
 
   // Renders into a throwaway offscreen canvas at a flat HD factor rather
@@ -201,7 +202,7 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
     const result = renderDiagram(exportCanvas, road.roadDetail, road.settings, road.range, EXPORT_SCALE)
     if (!result || exportCanvas.width === 0) return
     const link = document.createElement('a')
-    link.download = `${road.roadDetail.road_id}${rangeSuffix()}.png`
+    link.download = `${road.roadDetail.section_id}${rangeSuffix()}.png`
     link.href = exportCanvas.toDataURL('image/png')
     link.click()
   }
@@ -279,7 +280,7 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
             {road?.range && (
               <>
                 {' '}
-                &middot; Sta. {formatStation(road.range.startM)} &ndash; {formatStation(road.range.endM)}
+                &middot; {formatStationRange(road.roadDetail, road.range)}
               </>
             )}
           </span>
@@ -292,7 +293,7 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
             <div className="guide-steps-row">
               {[
                 { n: 1, label: 'Upload Excel', done: hasRoads },
-                { n: 2, label: 'Select road', done: !!road },
+                { n: 2, label: 'Select section', done: !!road },
                 { n: 3, label: 'Generate diagram', done: false },
               ].map((step, i, arr) => (
                 <div className="guide-step-wrap" key={step.n}>
@@ -371,11 +372,12 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
             <div key={i}>
               {i === 0 && (
                 <div className="print-only-header">
-                  <strong>{road.roadDetail.road_name}</strong> ({road.roadDetail.road_id})
+                  <strong>{road.roadDetail.section_id}</strong> &mdash; {road.roadDetail.road_name}
+                  {road.roadDetail.deo && <> &mdash; {road.roadDetail.deo}</>}
                   {road.range && (
                     <>
                       {' '}
-                      &mdash; Sta. {formatStation(road.range.startM)}&ndash;{formatStation(road.range.endM)}
+                      &mdash; {formatStationRange(road.roadDetail, road.range)}
                     </>
                   )}
                   {' '}&mdash; Generated {new Date().toLocaleDateString()}
@@ -400,6 +402,10 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
             <span>{tooltip.segment.start_station} &ndash; {tooltip.segment.end_station}</span>
           </div>
           <div className="tooltip-row">
+            <span>Length</span>
+            <span>{Math.round(tooltip.segment.length_m).toLocaleString()} m</span>
+          </div>
+          <div className="tooltip-row">
             <span>Lanes</span>
             <span>{tooltip.segment.num_lanes}</span>
           </div>
@@ -411,6 +417,9 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
             <span>Shoulder L / R</span>
             <span>{tooltip.segment.shoulder_left} / {tooltip.segment.shoulder_right}</span>
           </div>
+          {tooltip.segment.irregular_km_post && (
+            <div className="tooltip-irregular">⚠ Irregular km post</div>
+          )}
         </div>
       )}
 
