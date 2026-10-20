@@ -274,6 +274,20 @@ class NetworkSummary(BaseModel):
     roads: list[RoadSummaryStat]
 
 
+class FilteredSegmentsSummary(BaseModel):
+    total_length_m: float
+    asphalt_length_m: float
+    pct: int
+    # Only set when a surface_type filter was applied -- the same filters'
+    # total length WITHOUT that surface_type narrowing, so the frontend can
+    # show "<Surface>: X km of Y km" (X = total_length_m here, Y = this).
+    baseline_length_m: float | None = None
+
+
+class LaneCountsOut(BaseModel):
+    lanes: list[int]
+
+
 # ===== Backup / Restore =====
 # A backup is a full snapshot of what's in the backend DB -- road data was
 # never stored client-side, so this is what actually protects against the

@@ -35,6 +35,21 @@ const SHOULDER_H = 22
 const LANE_H = 22
 const STRIP_GAP = 44
 const BORDER_COLOR = '#333333'
+// Block boundaries (where two adjacent drawn blocks actually differ in
+// lanes/surface/shoulders, or a gap/overlap keeps them unmerged) are thin
+// and light rather than BORDER_COLOR's heavy dark -- with same-attribute
+// runs now merged into one wider block (see mergeSegmentsForDiagram above),
+// the remaining boundaries are real "something changed here" markers, not
+// every tiny segment's own box, so they don't need to shout.
+const BLOCK_BOUNDARY_COLOR = '#cbd5e1'
+// A block clipped to less than this many px (a short, unmerged -- different
+// attributes or a gap/overlap neighbor -- segment at the current zoom) still
+// renders at this minimum width rather than vanishing or anti-aliasing into
+// a near-invisible sliver. Blocks are drawn left-to-right, so a later block
+// painting over a widened earlier one's bled-over edge is what keeps this
+// from visibly overlapping; the tooltip hit region always uses the real
+// (unwidened) data, just the fill/stroke width is floored.
+const MIN_BLOCK_WIDTH_PX = 2
 const MARKING_COLOR = 'rgba(255,255,255,0.75)'
 const ARROW_SPACING_PX = 70
 const MARKED_SURFACES = new Set(['asphalt', 'concrete']) // surfaces with painted lane markings
@@ -98,6 +113,43 @@ function clampScaleToCanvasLimit(logicalWidth, logicalHeight, scale) {
   return Math.min(scale, maxScale)
 }
 
+// Tolerance for comparing station positions (meters) when deciding whether
+// two segments are exactly contiguous -- these come straight from stored
+// floats on both sides of the comparison, not re-derived, so float drift is
+// not expected, but a tiny epsilon is cheap insurance.
+const MERGE_EPSILON_M = 0.01
+
+// Merges consecutive (sorted by start_m) segments that share identical
+// lanes/surface/shoulders into one wider block for the DIAGRAM ONLY -- real
+// DPWH data splits a section into many short same-attribute segments at
+// every km post, which (drawn one at a time) made the diagram look like a
+// barcode of vertical lines. Only merges truly contiguous runs (curr.start_m
+// === prev.end_m); a gap or overlap always starts a new block, so those stay
+// visible exactly as before. The table/API data itself is untouched -- this
+// runs only on the array handed to the renderer.
+function mergeSegmentsForDiagram(segments) {
+  const merged = []
+  for (const seg of segments) {
+    const last = merged[merged.length - 1]
+    const sameAttrs =
+      last &&
+      last.num_lanes === seg.num_lanes &&
+      last.surface_type === seg.surface_type &&
+      last.shoulder_left === seg.shoulder_left &&
+      last.shoulder_right === seg.shoulder_right
+    const contiguous = last && Math.abs(seg.start_m - last.end_m) < MERGE_EPSILON_M
+    if (sameAttrs && contiguous) {
+      last.end_m = seg.end_m
+      last.end_station = seg.end_station
+      last.length_m += seg.length_m
+      last.mergedCount += 1
+    } else {
+      merged.push({ ...seg, mergedCount: 1 })
+    }
+  }
+  return merged
+}
+
 // Shared layout math used by both the combined multi-strip canvas (on-screen
 // view) and the one-canvas-per-strip print path. `range` (optional)
 // restricts the diagram to a station sub-range of the road: { startM, endM }
@@ -117,9 +169,11 @@ function computeStripPlan(road, settings, range) {
   // never drawn (see drawStrip's clip check, which always skips them since
   // end_m <= start_m by construction), so they shouldn't inflate the lane
   // band either.
-  const relevantSegments = (
-    range ? road.segments.filter((s) => s.end_m > range.startM && s.start_m < range.endM) : road.segments
-  ).filter((s) => !s.irregular_km_post)
+  const relevantSegments = mergeSegmentsForDiagram(
+    (range ? road.segments.filter((s) => s.end_m > range.startM && s.start_m < range.endM) : road.segments).filter(
+      (s) => !s.irregular_km_post
+    )
+  )
 
   const globalMaxLanes = relevantSegments.length
     ? Math.max(...relevantSegments.map((s) => s.num_lanes))
@@ -373,7 +427,7 @@ function drawStrip(ctx, cfg) {
 
     const x = px(x0 + (clippedStart - stripStartM) * pxPerMeter)
     const xEnd = px(x0 + (clippedEnd - stripStartM) * pxPerMeter)
-    const w = xEnd - x
+    const w = Math.max(xEnd - x, MIN_BLOCK_WIDTH_PX)
 
     // Done/not-done status strip -- independent of the surface-type legend
     // colors, so progress reads at a glance without reinterpreting materials.
@@ -405,12 +459,14 @@ function drawStrip(ctx, cfg) {
       drawLaneMarkings(ctx, { x, w, laneBandTop, offset, numLanes: seg.num_lanes })
     }
 
-    // Outer border around the full column (shoulder-to-shoulder). Offset by
-    // 0.5px so this 1px-wide stroke's centerline lands on a pixel boundary
-    // instead of straddling one (which is what makes a 1px canvas line
-    // render as a soft 2px blur) -- the fills above keep their exact
-    // boundaries; only the stroke itself is inset.
-    ctx.strokeStyle = BORDER_COLOR
+    // Outer border around the full column (shoulder-to-shoulder) -- marks a
+    // real block boundary (different attributes, or a gap/overlap that
+    // blocked merging), so it's the thin light BLOCK_BOUNDARY_COLOR, not
+    // BORDER_COLOR's dark. Offset by 0.5px so this 1px-wide stroke's
+    // centerline lands on a pixel boundary instead of straddling one (which
+    // is what makes a 1px canvas line render as a soft 2px blur) -- the
+    // fills above keep their exact boundaries; only the stroke itself is inset.
+    ctx.strokeStyle = BLOCK_BOUNDARY_COLOR
     ctx.lineWidth = 1
     ctx.strokeRect(x + 0.5, topShoulderY + 0.5, w - 1, SHOULDER_H + laneBandH + SHOULDER_H - 1)
 
@@ -534,7 +590,7 @@ function drawArrowsAlong(ctx, x, w, y, pointsRight) {
 function paintCell(ctx, x, y, w, h, surfaceType, scale = 1) {
   ctx.fillStyle = fillForCell(ctx, surfaceType, x, y, w, h, scale)
   ctx.fillRect(x, y, w, h)
-  ctx.strokeStyle = BORDER_COLOR
-  ctx.lineWidth = 0.5
+  ctx.strokeStyle = BLOCK_BOUNDARY_COLOR
+  ctx.lineWidth = 1
   ctx.strokeRect(x, y, w, h)
 }

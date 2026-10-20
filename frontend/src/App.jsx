@@ -10,6 +10,7 @@ import NetworkBreakdownModal from './components/inventory/NetworkBreakdownModal'
 import DiagramPanel from './components/diagram/DiagramPanel'
 import {
   deleteRoad,
+  fetchLaneCounts,
   fetchNetworkSummary,
   fetchRoadDetail,
   fetchRoadsList,
@@ -24,7 +25,14 @@ import './App.css'
 
 const PAGE_SIZE = 10
 
-const EMPTY_TABLE_FILTERS = { sectionId: '', district: '', classification: '', status: '', surfaceType: '' }
+const EMPTY_TABLE_FILTERS = {
+  sectionId: '',
+  district: '',
+  classification: '',
+  status: '',
+  surfaceType: '',
+  numLanes: '',
+}
 
 // Groups the flat /api/roads list into one entry per District (DEO), each
 // carrying its distinct LD value(s) and how many sections fall under it --
@@ -59,6 +67,7 @@ export default function App() {
   const [tableFilters, setTableFilters] = useState(EMPTY_TABLE_FILTERS)
   const [tableSort, setTableSort] = useState({ sortBy: null, sortDir: 'asc' })
   const [networkSummary, setNetworkSummary] = useState(null)
+  const [laneCounts, setLaneCounts] = useState([])
   const [settings, setSettings] = useState({ stationIntervalM: 1000, stationsPerLine: 10 })
   const [range, setRange] = useState({ startRaw: '', endRaw: '' })
   const [generatedRange, setGeneratedRange] = useState(null)
@@ -98,7 +107,12 @@ export default function App() {
     setGeneratedRange(null)
     setHasGenerated(false)
     setTablePage(1)
-    await Promise.all([refreshRoads(), refreshSegmentsPage(1, tableFilters, tableSort), refreshSummary()])
+    await Promise.all([
+      refreshRoads(),
+      refreshSegmentsPage(1, tableFilters, tableSort),
+      refreshSummary(),
+      refreshLaneCounts(),
+    ])
   }
 
   // Deliberately rethrows on failure instead of catching -- SignInModal is
@@ -146,6 +160,11 @@ export default function App() {
     setRoads(list)
   }
 
+  async function refreshLaneCounts() {
+    const data = await fetchLaneCounts()
+    setLaneCounts(data.lanes)
+  }
+
   async function refreshSegmentsPage(page, filters, sort) {
     const data = await fetchSegmentsPage(page, PAGE_SIZE, filters, sort)
     setSegmentsPage(data)
@@ -160,6 +179,7 @@ export default function App() {
     refreshRoads()
     refreshSegmentsPage(1, tableFilters, tableSort)
     refreshSummary()
+    refreshLaneCounts()
   }, [])
 
   // One-time cleanup of keys left behind by the retired "No backup in 7
@@ -260,6 +280,7 @@ export default function App() {
     setTablePage(1)
     await refreshSegmentsPage(1, tableFilters, tableSort)
     await refreshSummary()
+    await refreshLaneCounts()
     // Saved in the same step as the upload completing, so metadata can never
     // drift out of sync with whether an upload actually happened.
     const meta = { fileName, uploadedAt: new Date().toISOString(), rejected: uploadResult.rejected }
@@ -324,6 +345,7 @@ export default function App() {
     await refreshRoads()
     await refreshSegmentsPage(1, EMPTY_TABLE_FILTERS, tableSort)
     await refreshSummary()
+    await refreshLaneCounts()
   }
 
   // Selecting a section from ANY entry point (the "2. Select Section" Section
@@ -400,6 +422,7 @@ export default function App() {
     setTablePage(1)
     await refreshSegmentsPage(1, nextFilters, tableSort)
     await refreshSummary()
+    await refreshLaneCounts()
     if (freshRoads.length === 0) {
       setUploadMeta(null)
       writeUploadMeta(null)
@@ -507,6 +530,8 @@ export default function App() {
             roads={roads}
             districts={districts}
             classifications={classifications}
+            laneCounts={laneCounts}
+            networkSummary={networkSummary}
             filters={tableFilters}
             onFilterChange={handleFilterChange}
             sort={tableSort}

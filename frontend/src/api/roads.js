@@ -21,6 +21,7 @@ function buildSegmentsParams(filters = {}, sort = {}) {
   if (filters.classification) params.set('classification', filters.classification)
   if (filters.status) params.set('status', filters.status)
   if (filters.surfaceType) params.set('surface_type', filters.surfaceType)
+  if (filters.numLanes) params.set('num_lanes', filters.numLanes)
   if (sort.sortBy) {
     params.set('sort_by', sort.sortBy)
     params.set('sort_dir', sort.sortDir || 'asc')
@@ -124,5 +125,16 @@ export async function editSegment(segmentId, fields) {
 
 export async function fetchNetworkSummary() {
   const res = await fetch(`${BASE}/summary`)
+  return handleResponse(res)
+}
+
+export async function fetchFilteredSegmentsSummary(filters = {}) {
+  const params = buildSegmentsParams(filters, {})
+  const res = await fetch(`${BASE}/segments/summary?${params.toString()}`)
+  return handleResponse(res)
+}
+
+export async function fetchLaneCounts() {
+  const res = await fetch(`${BASE}/lane-counts`)
   return handleResponse(res)
 }

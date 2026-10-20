@@ -1,7 +1,7 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Pagination from './Pagination'
 import CustomSelect from '../common/CustomSelect'
-import { editSegment, getSegmentsExportUrl } from '../../api/roads'
+import { editSegment, fetchFilteredSegmentsSummary, getSegmentsExportUrl } from '../../api/roads'
 import { SHOULDER_SWATCHES, SURFACE_SWATCHES } from '../../utils/surfaceSwatches'
 import { showToast } from '../common/DialogProvider'
 
@@ -115,6 +115,8 @@ export default function RoadInventoryTable({
   roads,
   districts,
   classifications,
+  laneCounts,
+  networkSummary,
   filters,
   onFilterChange,
   sort,
@@ -127,13 +129,46 @@ export default function RoadInventoryTable({
     filters.district ||
     filters.classification ||
     filters.status ||
-    filters.surfaceType
+    filters.surfaceType ||
+    filters.numLanes
   )
 
   const [editingId, setEditingId] = useState(null)
   const [draft, setDraft] = useState(null)
   const [saving, setSaving] = useState(false)
   const [tableScrolledOver, setTableScrolledOver] = useState(false)
+  const [filteredSummary, setFilteredSummary] = useState(null)
+
+  // Totals for the CURRENT filters, across all matching rows (not just the
+  // visible page) -- backend-aggregated so this stays fast at 11k+ rows.
+  // Skipped entirely when no filter is active (the network-wide totals the
+  // header/diagram already fetched are reused instead, see render below).
+  useEffect(() => {
+    if (!hasActiveFilters) {
+      setFilteredSummary(null)
+      return
+    }
+    let cancelled = false
+    fetchFilteredSegmentsSummary(filters)
+      .then((data) => {
+        if (!cancelled) setFilteredSummary(data)
+      })
+      .catch(() => {
+        if (!cancelled) setFilteredSummary(null)
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    hasActiveFilters,
+    filters.sectionId,
+    filters.district,
+    filters.classification,
+    filters.status,
+    filters.surfaceType,
+    filters.numLanes,
+  ])
 
   const tableScrollRef = useRef(null)
   const actionsCellRefs = useRef(new Map())
@@ -173,6 +208,10 @@ export default function RoadInventoryTable({
     { value: '', label: 'All surface types' },
     ...SURFACE_TYPE_OPTIONS.map((s) => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) })),
   ]
+  const laneOptions = [
+    { value: '', label: 'All' },
+    ...laneCounts.map((n) => ({ value: String(n), label: String(n) })),
+  ]
 
   function updateFilter(key, value) {
     const next = { ...filters, [key]: value }
@@ -187,7 +226,14 @@ export default function RoadInventoryTable({
   }
 
   function clearFilters() {
-    onFilterChange({ sectionId: '', district: '', classification: '', status: '', surfaceType: '' })
+    onFilterChange({
+      sectionId: '',
+      district: '',
+      classification: '',
+      status: '',
+      surfaceType: '',
+      numLanes: '',
+    })
   }
 
   // Manual scrollLeft/scrollTop math instead of el.scrollIntoView() -- this
@@ -329,6 +375,53 @@ export default function RoadInventoryTable({
     return parts.join('\n')
   }
 
+  // "in Section X" / "in District Y" suffix for the surface-type-filtered
+  // phrasing ("Asphalt: 18.9 km of 19.0 km in Section S00419MN").
+  function filterContextSuffix() {
+    if (filters.sectionId) return ` in Section ${filters.sectionId}`
+    if (filters.district) return ` in ${filters.district}`
+    return ''
+  }
+
+  function km(meters) {
+    return (meters / 1000).toFixed(1)
+  }
+
+  // Builds the summary bar's {pct, text} -- network totals (already fetched
+  // by the header) when no filter is active, otherwise the backend-
+  // aggregated filtered totals once they've loaded.
+  function buildSummaryDisplay() {
+    if (!hasActiveFilters) {
+      if (!networkSummary) return null
+      return {
+        pct: networkSummary.pct,
+        text: `${networkSummary.pct}% Asphalted (${km(networkSummary.asphalt_length_m)} km of ${km(networkSummary.total_length_m)} km)`,
+        filteredLine: null,
+      }
+    }
+    if (!filteredSummary) return null
+    const totalRecords = segmentsPage?.total_records ?? 0
+    const filteredLine = `Filtered: ${km(filteredSummary.total_length_m)} km · ${totalRecords} segment${totalRecords !== 1 ? 's' : ''}`
+    if (filters.surfaceType && filteredSummary.baseline_length_m != null) {
+      const label = filters.surfaceType.charAt(0).toUpperCase() + filters.surfaceType.slice(1)
+      const numerator = filteredSummary.total_length_m
+      const denominator = filteredSummary.baseline_length_m
+      const pct = denominator > 0 ? Math.round((numerator / denominator) * 100) : 0
+      return {
+        pct,
+        text: `${label}: ${km(numerator)} km of ${km(denominator)} km${filterContextSuffix()}`,
+        filteredLine,
+      }
+    }
+    return {
+      pct: filteredSummary.pct,
+      text: `${filteredSummary.pct}% Asphalted (${km(filteredSummary.asphalt_length_m)} km of ${km(filteredSummary.total_length_m)} km)`,
+      filteredLine,
+    }
+  }
+
+  const summaryDisplay = buildSummaryDisplay()
+
   return (
     <div className="panel inventory-table">
       <div className="panel-header-row">
@@ -436,6 +529,17 @@ export default function RoadInventoryTable({
             renderOption={(o) => (o.value === '' ? o.label : renderSurfaceOption(o))}
           />
         </div>
+        <div className="filter-field filter-field-lanes">
+          <span>Number of Lanes</span>
+          <CustomSelect
+            size="sm"
+            value={filters.numLanes}
+            onChange={(v) => updateFilter('numLanes', v)}
+            options={laneOptions}
+            ariaLabel="Filter by number of lanes"
+            disabled={laneCounts.length === 0}
+          />
+        </div>
         {hasActiveFilters && (
           <div className="filter-action">
             <span className="filter-label-spacer">&nbsp;</span>
@@ -458,6 +562,16 @@ export default function RoadInventoryTable({
           </a>
         </div>
       </div>
+
+      {summaryDisplay && (
+        <div className="table-summary-bar">
+          {summaryDisplay.filteredLine && <span className="table-summary-filtered-line">{summaryDisplay.filteredLine}</span>}
+          <div className="completion-bar table-summary-bar-track">
+            <div className="completion-bar-fill" style={{ width: `${summaryDisplay.pct}%` }} />
+          </div>
+          <span className="completion-label">{summaryDisplay.text}</span>
+        </div>
+      )}
 
       <div
         className={`table-scroll thin-scroll${tableScrolledOver ? ' table-scroll-has-overflow' : ''}`}

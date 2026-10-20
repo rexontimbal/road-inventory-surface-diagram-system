@@ -417,6 +417,12 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
             <span>Shoulder L / R</span>
             <span>{tooltip.segment.shoulder_left} / {tooltip.segment.shoulder_right}</span>
           </div>
+          {tooltip.segment.mergedCount > 1 && (
+            <div className="tooltip-row">
+              <span>Merged</span>
+              <span>{tooltip.segment.mergedCount} segments</span>
+            </div>
+          )}
           {tooltip.segment.irregular_km_post && (
             <div className="tooltip-irregular">⚠ Irregular km post</div>
           )}

@@ -1516,6 +1516,10 @@ button:focus-visible {
 .filter-field-surface .custom-select-sm {
   width: 160px;
 }
+.filter-field-lanes select,
+.filter-field-lanes .custom-select-sm {
+  width: 110px;
+}
 .filter-bar .filter-field select:focus {
   outline: none;
   border-color: var(--accent);
@@ -1988,6 +1992,26 @@ tbody tr:hover .row-edit-btn,
   align-items: center;
   gap: 12px;
   margin-bottom: 14px;
+}
+/* "4. Road Inventory Data"'s filtered-totals bar -- same completion-bar/
+   completion-label classes the diagram panel uses, so the two look like
+   the same visual language, just with an optional "Filtered: X km · N
+   segments" line stacked above when a filter is narrowing the table. */
+.table-summary-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+.table-summary-filtered-line {
+  flex-basis: 100%;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+.table-summary-bar-track {
+  flex: 1;
+  min-width: 120px;
 }
 .completion-bar {
   flex: 1;

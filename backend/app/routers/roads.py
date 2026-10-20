@@ -16,6 +16,8 @@ from app.excel_import import ImportResult, TemplateError, parse_upload
 from app.models import SHOULDER_TYPES, SURFACE_TYPES, Road, RoadSegment, UploadLogEntry  # noqa: F401 -- UploadLogEntry import registers the table for create_all
 from app.scope import Scope, apply_scope, get_scope, owner_kwargs, user_kwargs
 from app.schemas import (
+    FilteredSegmentsSummary,
+    LaneCountsOut,
     LogUserOut,
     NetworkSummary,
     RoadDetail,
@@ -84,7 +86,7 @@ _SORT_COLUMNS = {
 }
 
 
-def _filtered_segments_query(db, scope: Scope, section_id, district, classification, status, surface_type):
+def _filtered_segments_query(db, scope: Scope, section_id, district, classification, status, surface_type, num_lanes=None):
     if status is not None and status not in ("Complete", "Incomplete"):
         raise HTTPException(status_code=400, detail="status must be 'Complete' or 'Incomplete'")
 
@@ -108,12 +110,28 @@ def _filtered_segments_query(db, scope: Scope, section_id, district, classificat
         query = query.filter(Road.classification == classification)
     if surface_type:
         query = query.filter(RoadSegment.surface_type == surface_type)
+    if num_lanes is not None:
+        query = query.filter(RoadSegment.num_lanes == num_lanes)
     if status == "Complete":
         query = query.filter(RoadSegment.surface_type == "asphalt")
     elif status == "Incomplete":
         query = query.filter(RoadSegment.surface_type != "asphalt")
 
     return query
+
+
+def _sum_length_and_asphalt(base_query) -> tuple[float, float]:
+    """Aggregates a _filtered_segments_query result down to (total length,
+    asphalt length) in one query -- irregular-km-post segments store
+    length_m=0 already (see chainage.py), so they're excluded from both sums
+    just by summing the column, no extra filter needed here."""
+    total, asphalt = base_query.with_entities(
+        func.coalesce(func.sum(RoadSegment.length_m), 0.0),
+        func.coalesce(
+            func.sum(case((RoadSegment.surface_type == "asphalt", RoadSegment.length_m), else_=0.0)), 0.0
+        ),
+    ).first()
+    return float(total), float(asphalt)
 
 
 def _apply_sort(query, sort_by, sort_dir):
@@ -496,6 +514,7 @@ def list_segments(
     classification: str | None = None,
     status: str | None = None,
     surface_type: str | None = None,
+    num_lanes: int | None = None,
     sort_by: str | None = None,
     sort_dir: str = "asc",
     db: Session = Depends(get_db),
@@ -506,7 +525,7 @@ def list_segments(
     if page_size < 1 or page_size > 500:
         raise HTTPException(status_code=400, detail="page_size must be between 1 and 500")
 
-    base_query = _filtered_segments_query(db, scope, section_id, district, classification, status, surface_type)
+    base_query = _filtered_segments_query(db, scope, section_id, district, classification, status, surface_type, num_lanes)
     total_records = base_query.count()
     total_pages = max(1, (total_records + page_size - 1) // page_size)
 
@@ -649,16 +668,43 @@ def export_segments(
     classification: str | None = None,
     status: str | None = None,
     surface_type: str | None = None,
+    num_lanes: int | None = None,
     sort_by: str | None = None,
     sort_dir: str = "asc",
     db: Session = Depends(get_db),
     scope: Scope = Depends(get_scope),
 ):
-    base_query = _filtered_segments_query(db, scope, section_id, district, classification, status, surface_type)
+    base_query = _filtered_segments_query(db, scope, section_id, district, classification, status, surface_type, num_lanes)
     rows = _apply_sort(base_query, sort_by, sort_dir).all()
+
+    total_length_m, asphalt_length_m = _sum_length_and_asphalt(base_query)
+    pct = round((asphalt_length_m / total_length_m) * 100) if total_length_m > 0 else 0
+    filter_bits = []
+    if district:
+        filter_bits.append(f"District={district}")
+    if section_id:
+        filter_bits.append(f"Section={section_id}")
+    if classification:
+        filter_bits.append(f"Classification={classification}")
+    if status:
+        filter_bits.append(f"Status={status}")
+    if surface_type:
+        filter_bits.append(f"Surface={surface_type}")
+    if num_lanes is not None:
+        filter_bits.append(f"Lanes={num_lanes}")
+    filters_text = ", ".join(filter_bits) if filter_bits else "none"
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)
+    writer.writerow(
+        [
+            f"Filters: {filters_text}",
+            f"Total length: {total_length_m / 1000:.1f} km",
+            f"% Asphalted: {pct}%",
+            f"{len(rows)} segments",
+        ]
+    )
+    writer.writerow([])
     writer.writerow(
         [
             "Section ID",
@@ -701,6 +747,56 @@ def export_segments(
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=road_inventory_export.csv"},
     )
+
+
+@router.get("/segments/summary", response_model=FilteredSegmentsSummary)
+def get_filtered_segments_summary(
+    section_id: str | None = None,
+    district: str | None = None,
+    classification: str | None = None,
+    status: str | None = None,
+    surface_type: str | None = None,
+    num_lanes: int | None = None,
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
+):
+    """Aggregate totals for the current table filters -- backs the summary
+    bar above '4. Road Inventory Data'. One query for the filtered set as
+    given; when a surface_type filter is active, a second query (same
+    filters minus surface_type) gives the "of Y km" baseline the frontend
+    needs for the "<Surface>: X km of Y km" phrasing -- still one HTTP call,
+    both aggregates computed here rather than two round trips."""
+    base_query = _filtered_segments_query(db, scope, section_id, district, classification, status, surface_type, num_lanes)
+    total_length_m, asphalt_length_m = _sum_length_and_asphalt(base_query)
+    pct = round((asphalt_length_m / total_length_m) * 100) if total_length_m > 0 else 0
+
+    baseline_length_m = None
+    if surface_type:
+        baseline_query = _filtered_segments_query(db, scope, section_id, district, classification, status, None, num_lanes)
+        baseline_length_m, _ = _sum_length_and_asphalt(baseline_query)
+
+    return FilteredSegmentsSummary(
+        total_length_m=total_length_m,
+        asphalt_length_m=asphalt_length_m,
+        pct=pct,
+        baseline_length_m=baseline_length_m,
+    )
+
+
+@router.get("/lane-counts", response_model=LaneCountsOut)
+def get_lane_counts(db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
+    """Distinct Number-of-Lanes values actually present in this scope's
+    data, for the inventory table's Lanes filter -- it should only ever
+    offer choices that exist, not a hardcoded 1-12."""
+    query = db.query(RoadSegment.num_lanes).join(
+        Road,
+        (Road.section_id == RoadSegment.section_id)
+        & (Road.owner_type == RoadSegment.owner_type)
+        & (Road.owner_id == RoadSegment.owner_id),
+    )
+    query = apply_scope(query, Road, scope)
+    lanes = sorted({row[0] for row in query.distinct().all()})
+    return LaneCountsOut(lanes=lanes)
 
 
 @router.get("/summary", response_model=NetworkSummary)
