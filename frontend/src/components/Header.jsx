@@ -17,18 +17,6 @@ const HOW_TO_USE_STEPS = [
   { title: 'Print / Export', detail: 'Use "Print / PDF" or "Export PNG" above the diagram to save it.' },
 ]
 
-function formatLastUpload(date) {
-  const now = new Date()
-  const time = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-  const isToday = date.toDateString() === now.toDateString()
-  if (isToday) return `Last upload: ${time}`
-  const yesterday = new Date(now)
-  yesterday.setDate(now.getDate() - 1)
-  if (date.toDateString() === yesterday.toDateString()) return `Last upload: Yesterday, ${time}`
-  const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
-  return `Last upload: ${dateStr}, ${time}`
-}
-
 const KEYBOARD_SHORTCUTS = [
   { keys: '/', detail: 'Focus the Section filter' },
   { keys: 'G', detail: 'Generate the diagram (when enabled)' },
@@ -74,7 +62,6 @@ export function openHowToUse() {
 const Header = forwardRef(function Header(
   {
     summary,
-    lastUploadAt,
     onOpenNetworkBreakdown,
     authUser,
     authChecked,
@@ -183,14 +170,6 @@ const Header = forwardRef(function Header(
                   </svg>
                 </button>
               </div>
-              {lastUploadAt && (
-                <span
-                  className="header-last-upload"
-                  title={lastUploadAt.toLocaleString([], { dateStyle: 'full', timeStyle: 'medium' })}
-                >
-                  {formatLastUpload(lastUploadAt)}
-                </span>
-              )}
             </>
           )}
           <button

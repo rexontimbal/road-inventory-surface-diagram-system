@@ -519,7 +519,6 @@ export default function App() {
       <Header
         ref={headerRef}
         summary={networkSummary}
-        lastUploadAt={uploadMeta ? new Date(uploadMeta.uploadedAt) : null}
         onOpenNetworkBreakdown={() => setNetworkBreakdownOpen(true)}
         authUser={authUser}
         authChecked={authChecked}
