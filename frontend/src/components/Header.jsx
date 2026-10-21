@@ -1,7 +1,8 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import { showAlert } from './common/DialogProvider'
 import SignInModal from './auth/SignInModal'
 import UserMenu from './auth/UserMenu'
+import { registerHeaderToastSlot } from '../utils/headerToastSlot'
 
 // Two thresholds (not one) so a scroll position that lands between them can't
 // flip the header back and forth -- it only switches state when scrollY
@@ -80,6 +81,15 @@ const Header = forwardRef(function Header(
   const [signInOpen, setSignInOpen] = useState(false)
   const shrunkRef = useRef(false)
   const tickingRef = useRef(false)
+  const toastSlotRef = useRef(null)
+
+  // Hands the slot DOM node to DialogProvider (see headerToastSlot.js) --
+  // layout effect (not plain effect) so it's registered before the first
+  // paint, and before any toast fired during this same mount could race it.
+  useLayoutEffect(() => {
+    registerHeaderToastSlot(toastSlotRef.current)
+    return () => registerHeaderToastSlot(null)
+  }, [])
   // Sharing always operates on the CALLER's own workspace (see
   // app/routers/workspace.py) -- the button only makes sense while viewing
   // your own data, not someone else's shared-with-you workspace.
@@ -133,6 +143,12 @@ const Header = forwardRef(function Header(
             <p>Excel-Based Road Inventory Management</p>
           </div>
         </div>
+
+        {/* The free space between the title and the right-side button group
+            -- toasts portal directly into this node (see headerToastSlot.js)
+            so they're automatically centered in whatever room is actually
+            left, via plain flex layout, and can never overlap either side. */}
+        <div className="app-header-toast-slot no-print" ref={toastSlotRef} />
 
         <div className="app-header-right">
           {hasStats && (

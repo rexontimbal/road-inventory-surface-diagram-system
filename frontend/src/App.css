@@ -233,6 +233,24 @@
   font-size: 12.5px;
   color: #94a3b8;
 }
+/* Takes exactly whatever's left between .app-header-brand (which can
+   shrink its own title via ellipsis) and .app-header-right (flex-shrink:0,
+   never shrinks) -- the toast portaled inside is centered within it by
+   plain flexbox, no manual position math needed. min-width:0 is required
+   for a flex child to actually shrink below its content size instead of
+   overflowing; overflow:hidden on a header with its own clipped background
+   pattern (see .app-header::after above) means an unexpectedly-wide toast
+   would clip rather than spill out, acting as a hard safety net on top of
+   the deliberate max-width on .header-toast itself. */
+.app-header-toast-slot {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
 .app-header-right {
   flex-shrink: 0;
   display: flex;
@@ -3914,6 +3932,100 @@ tbody tr:hover .row-edit-btn,
   .toast-stack {
     top: 72px;
   }
+}
+
+/* ===== Header-docked toast =====
+   Rendered INSIDE .app-header-toast-slot (a real flex child between the
+   title and the right-side button group -- see Header.jsx/App.css above),
+   so centering and "never overlaps the title/chips/Share/avatar" are both
+   just plain flex layout, not manual position math. Compact single-line
+   variant of the same white-card design as .toast-stack; only used while
+   that slot actually has room (DialogProvider falls back to the normal
+   top-center stack otherwise, including the whole time the diagram is
+   fullscreen, where the header doesn't exist at all). */
+.header-toast {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 440px;
+  min-width: 0;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.22);
+  overflow: hidden;
+  animation: header-toast-enter 200ms ease-out both;
+}
+.header-toast-closing {
+  animation: header-toast-exit 180ms ease-in both;
+}
+@keyframes header-toast-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes header-toast-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+.header-toast-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+}
+.header-toast-icon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.header-toast-avatar {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--accent);
+}
+.header-toast-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+  color: #0f172a;
+}
+.header-toast-text strong {
+  font-weight: 600;
+}
+.header-toast-text-sep,
+.header-toast-message {
+  color: #64748b;
+  font-weight: 400;
+}
+.header-toast-controls {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.header-toast .toast-progress-track {
+  height: 2px;
 }
 
 /* ===== Fullscreen Road Surface Diagram ===== */

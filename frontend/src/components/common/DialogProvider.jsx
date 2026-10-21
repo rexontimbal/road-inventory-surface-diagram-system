@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Modal from './Modal'
 import { getFullscreenPortalRoot } from '../../utils/fullscreenPortal'
+import { subscribeHeaderToastSlot } from '../../utils/headerToastSlot'
 
 let _confirmHandler = null
 let _alertHandler = null
@@ -27,11 +28,17 @@ export function showAlert(options) {
 }
 
 /**
- * Shows a top-center toast card. variant: 'success' | 'danger' | 'warning' | 'info'.
- * `title` defaults from variant when omitted -- every existing call site that
- * only passes `message` keeps working unchanged, it just becomes the
- * secondary line under the (now-required-looking) title. `avatarUrl` swaps
- * the variant icon for a round avatar (used for share notifications).
+ * Shows a toast. variant: 'success' | 'danger' | 'warning' | 'info'. `title`
+ * defaults from variant when omitted -- every existing call site that only
+ * passes `message` keeps working unchanged, it just becomes the secondary
+ * line under the (now-required-looking) title. `avatarUrl` swaps the
+ * variant icon for a round avatar (used for share notifications).
+ *
+ * Renders docked inside the header's own free space (between the title and
+ * the right-side buttons) when there's room for it and the diagram isn't
+ * fullscreen; otherwise falls back to the centered stack below the header
+ * (also always used inside fullscreen, which has no header at all). That
+ * choice is made once, when the toast is created.
  */
 export function showToast(options) {
   if (_toastHandler) _toastHandler(options)
@@ -51,8 +58,49 @@ const DEFAULT_DURATIONS = {
   danger: 8000,
 }
 
-const MAX_VISIBLE_TOASTS = 3
+const MAX_VISIBLE_STACK_TOASTS = 3
 const EXIT_DURATION_MS = 180
+// Below this, the header's free space is too cramped for even the compact
+// one-line card -- falls back to the normal centered stack instead.
+const HEADER_SLOT_MIN_PX = 280
+
+function ToastVariantIcon({ variant }) {
+  if (variant === 'success') {
+    return (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+        <path d="m5 13 4 4 10-10" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    )
+  }
+  if (variant === 'warning') {
+    return (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+        <path d="M12 9v4.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+        <circle cx="12" cy="16.3" r="1.1" fill="currentColor" />
+        <path
+          d="M10.3 3.9 2.6 17.2a2 2 0 0 0 1.73 3h15.34a2 2 0 0 0 1.73-3L13.7 3.9a2 2 0 0 0-3.4 0Z"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinejoin="round"
+        />
+      </svg>
+    )
+  }
+  if (variant === 'danger') {
+    return (
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+        <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" />
+      </svg>
+    )
+  }
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M12 11v5.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="12" cy="7.8" r="1.1" fill="currentColor" />
+    </svg>
+  )
+}
 
 export default function DialogProvider({ children }) {
   const [confirmState, setConfirmState] = useState(null)
@@ -68,6 +116,36 @@ export default function DialogProvider({ children }) {
   useEffect(() => {
     toastsRef.current = toasts
   }, [toasts])
+
+  // The header's toast slot (see utils/headerToastSlot.js) -- both a ref
+  // (so _toastHandler's one-time closure can read the CURRENT value when
+  // deciding where a new toast should go) and state (so the portal target
+  // in the JSX below actually re-renders when it changes).
+  const [headerSlotEl, setHeaderSlotEl] = useState(null)
+  const headerSlotElRef = useRef(null)
+  const [headerSlotWidth, setHeaderSlotWidth] = useState(0)
+  const headerSlotWidthRef = useRef(0)
+
+  useEffect(() => subscribeHeaderToastSlot((el) => {
+    headerSlotElRef.current = el
+    setHeaderSlotEl(el)
+  }), [])
+
+  useEffect(() => {
+    if (!headerSlotEl) {
+      headerSlotWidthRef.current = 0
+      setHeaderSlotWidth(0)
+      return
+    }
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect?.width ?? 0
+      headerSlotWidthRef.current = w
+      setHeaderSlotWidth(w)
+    })
+    ro.observe(headerSlotEl)
+    return () => ro.disconnect()
+  }, [headerSlotEl])
+
   // Re-renders on every fullscreen enter/exit so the toast portal below
   // (which otherwise might not re-render around that exact moment) always
   // targets the current getFullscreenPortalRoot() -- a toast fired while
@@ -91,22 +169,27 @@ export default function DialogProvider({ children }) {
     _alertHandler = (opts) => setAlertState(opts)
     _toastHandler = (opts) => {
       const variant = opts.variant ?? 'info'
-      // Dedupe against whatever's already on screen -- a caller that fires
-      // the same failure 2-3 times in a row (a double-click, a retry, the
-      // same error surfacing from more than one place) shows ONE toast, not
-      // a stack of identical ones. Scoped to currently-visible toasts, which
-      // already bounds this to "the last few seconds" since toasts
-      // auto-dismiss on their own.
+      const isFullscreenNow = !!(document.fullscreenElement || document.webkitFullscreenElement)
+      const lane =
+        !isFullscreenNow && headerSlotElRef.current && headerSlotWidthRef.current >= HEADER_SLOT_MIN_PX ? 'dock' : 'stack'
+
+      // Dedupe against whatever's already pending IN THE SAME LANE -- a
+      // caller that fires the same failure 2-3 times in a row (a double-
+      // click, a retry, the same error surfacing from more than one place)
+      // shows ONE toast, not a stack/queue of identical ones.
+      const title = opts.title ?? DEFAULT_TITLES[variant]
       const isDuplicate = toastsRef.current.some(
-        (t) => !t.closing && t.variant === variant && t.message === opts.message && t.title === (opts.title ?? DEFAULT_TITLES[variant])
+        (t) => t.lane === lane && !t.closing && t.variant === variant && t.message === opts.message && t.title === title
       )
       if (isDuplicate) return
+
       const id = `${Date.now()}-${Math.random()}`
       const duration = opts.duration ?? DEFAULT_DURATIONS[variant] ?? 4000
       const toast = {
         id,
+        lane,
         variant,
-        title: opts.title ?? DEFAULT_TITLES[variant],
+        title,
         message: opts.message,
         actionLabel: opts.actionLabel,
         onAction: opts.onAction,
@@ -114,18 +197,30 @@ export default function DialogProvider({ children }) {
         duration,
         closing: false,
       }
+
       setToasts((t) => {
-        const next = [...t, toast]
-        // Max 3 visible at once -- the oldest beyond that limit is dropped
-        // outright (its timer never scheduled) rather than kept around
-        // invisibly, so the array itself never grows unbounded.
-        if (next.length > MAX_VISIBLE_TOASTS) {
-          const dropped = next.splice(0, next.length - MAX_VISIBLE_TOASTS)
-          for (const d of dropped) clearToastTimer(d.id)
+        let next = [...t, toast]
+        // The stack lane keeps its existing "max 3 visible, oldest dropped"
+        // cap. The dock lane is a true queue instead (only one toast is
+        // ever shown there at a time -- see the effect below -- so nothing
+        // needs to be evicted; it just waits its turn).
+        if (lane === 'stack') {
+          const stackItems = next.filter((x) => x.lane === 'stack' && !x.closing)
+          if (stackItems.length > MAX_VISIBLE_STACK_TOASTS) {
+            const evictIds = new Set(stackItems.slice(0, stackItems.length - MAX_VISIBLE_STACK_TOASTS).map((x) => x.id))
+            for (const evictId of evictIds) clearToastTimer(evictId)
+            next = next.filter((x) => !evictIds.has(x.id))
+          }
         }
         return next
       })
-      scheduleToastDismiss(id, duration)
+
+      // Stack-lane toasts start their countdown immediately, same as
+      // before. Dock-lane toasts only start once they actually become the
+      // visible one -- see the queue-advance effect below -- so a toast
+      // waiting behind another doesn't silently burn through its own
+      // duration before anyone's seen it.
+      if (lane === 'stack') scheduleToastDismiss(id, duration)
     }
     return () => {
       _confirmHandler = null
@@ -133,6 +228,18 @@ export default function DialogProvider({ children }) {
       _toastHandler = null
     }
   }, [])
+
+  // Advances the dock queue: whenever the front dock-lane toast changes
+  // (a new one arrives with nothing ahead of it, or the previous front one
+  // finishes closing and is removed), start its timer if that hasn't
+  // happened yet. toastTimers already having an entry for it is the signal
+  // "already started" -- covers both cases without tracking a separate flag.
+  useEffect(() => {
+    const frontDock = toasts.find((t) => t.lane === 'dock' && !t.closing)
+    if (frontDock && !toastTimers.current.has(frontDock.id)) {
+      scheduleToastDismiss(frontDock.id, frontDock.duration)
+    }
+  }, [toasts])
 
   function closeConfirm(result) {
     confirmState?.resolve(result)
@@ -182,10 +289,14 @@ export default function DialogProvider({ children }) {
   }
 
   // Newest first (top of the stack), capped to the visible window -- the
-  // underlying array can briefly exceed MAX_VISIBLE_TOASTS while an older
-  // one is still mid-exit-animation, so this is a render-time slice, not a
-  // second cap.
-  const visibleToasts = [...toasts].slice(-MAX_VISIBLE_TOASTS).reverse()
+  // underlying array can briefly exceed MAX_VISIBLE_STACK_TOASTS while an
+  // older one is still mid-exit-animation, so this is a render-time slice,
+  // not a second cap.
+  const stackToasts = toasts.filter((t) => t.lane === 'stack').slice(-MAX_VISIBLE_STACK_TOASTS).reverse()
+  // Only the front of the dock queue renders -- including while it's
+  // "closing" (mid exit-animation), so the fade-out actually plays instead
+  // of the next one popping in underneath it instantly.
+  const dockToast = toasts.find((t) => t.lane === 'dock')
 
   return (
     <>
@@ -215,9 +326,61 @@ export default function DialogProvider({ children }) {
         />
       )}
 
+      {dockToast &&
+        headerSlotEl &&
+        createPortal(
+          <div
+            className={`header-toast toast-${dockToast.variant}${dockToast.closing ? ' header-toast-closing' : ''}`}
+            role={dockToast.variant === 'warning' || dockToast.variant === 'danger' ? 'alert' : 'status'}
+            onMouseEnter={() => pauseToast(dockToast.id)}
+            onMouseLeave={() => resumeToast(dockToast.id)}
+            onFocus={() => pauseToast(dockToast.id)}
+            onBlur={() => resumeToast(dockToast.id)}
+          >
+            <div className="header-toast-row">
+              {dockToast.avatarUrl ? (
+                <img src={dockToast.avatarUrl} alt="" className="header-toast-avatar" referrerPolicy="no-referrer" />
+              ) : (
+                <span className={`header-toast-icon toast-icon-${dockToast.variant}`} aria-hidden="true">
+                  <ToastVariantIcon variant={dockToast.variant} />
+                </span>
+              )}
+              <span className="header-toast-text">
+                {dockToast.title && <strong>{dockToast.title}</strong>}
+                {dockToast.title && dockToast.message && <span className="header-toast-text-sep"> &middot; </span>}
+                {dockToast.message && <span className="header-toast-message">{dockToast.message}</span>}
+              </span>
+              <div className="header-toast-controls">
+                {dockToast.actionLabel && (
+                  <button
+                    type="button"
+                    className="toast-action"
+                    onClick={() => {
+                      dockToast.onAction?.()
+                      startClose(dockToast.id)
+                    }}
+                  >
+                    {dockToast.actionLabel}
+                  </button>
+                )}
+                <button type="button" className="toast-close" onClick={() => startClose(dockToast.id)} aria-label="Dismiss">
+                  ×
+                </button>
+              </div>
+            </div>
+            <div className="toast-progress-track">
+              <div
+                className={`toast-progress-bar toast-progress-${dockToast.variant}`}
+                style={{ animationDuration: `${dockToast.duration}ms` }}
+              />
+            </div>
+          </div>,
+          headerSlotEl
+        )}
+
       {createPortal(
         <div className="toast-stack no-print">
-          {visibleToasts.map((t) => (
+          {stackToasts.map((t) => (
             <div
               key={t.id}
               className={`toast toast-${t.variant}${t.closing ? ' toast-closing' : ''}`}
@@ -232,35 +395,7 @@ export default function DialogProvider({ children }) {
                   <img src={t.avatarUrl} alt="" className="toast-avatar" referrerPolicy="no-referrer" />
                 ) : (
                   <span className={`toast-icon toast-icon-${t.variant}`} aria-hidden="true">
-                    {t.variant === 'success' && (
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-                        <path d="m5 13 4 4 10-10" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    )}
-                    {t.variant === 'info' && (
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-                        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" />
-                        <path d="M12 11v5.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                        <circle cx="12" cy="7.8" r="1.1" fill="currentColor" />
-                      </svg>
-                    )}
-                    {t.variant === 'warning' && (
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-                        <path d="M12 9v4.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-                        <circle cx="12" cy="16.3" r="1.1" fill="currentColor" />
-                        <path
-                          d="M10.3 3.9 2.6 17.2a2 2 0 0 0 1.73 3h15.34a2 2 0 0 0 1.73-3L13.7 3.9a2 2 0 0 0-3.4 0Z"
-                          stroke="currentColor"
-                          strokeWidth="1.8"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    )}
-                    {t.variant === 'danger' && (
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                        <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" />
-                      </svg>
-                    )}
+                    <ToastVariantIcon variant={t.variant} />
                   </span>
                 )}
                 <div className="toast-text">
