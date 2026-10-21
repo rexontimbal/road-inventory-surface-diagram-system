@@ -130,13 +130,15 @@ export default function App() {
         if (notifiedKeysRef.current.has(key)) continue
         notifiedKeysRef.current.add(key)
         const roleLabel = item.role === 'editor' ? 'Editor' : 'Viewer'
-        const message =
-          item.last_change === 'role_changed'
-            ? `${item.owner_name} changed your access to ${roleLabel}`
-            : `${item.owner_name} shared their data with you (${roleLabel})`
+        const isRoleChange = item.last_change === 'role_changed'
+        const message = isRoleChange
+          ? `${item.owner_name} changed your access · ${roleLabel}`
+          : `${item.owner_name} shared their data with you · ${roleLabel}`
         showToast({
           variant: 'info',
+          title: isRoleChange ? 'Role updated' : 'Shared with you',
           message,
+          avatarUrl: item.owner_avatar_url,
           duration: 8000,
           actionLabel: 'Open',
           onAction: () => handleSwitchWorkspace(item.owner_user_id),

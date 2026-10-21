@@ -53,17 +53,30 @@
 }
 
 .workspace-banner {
+  box-sizing: border-box;
+  width: 100%;
   display: flex;
   align-items: center;
-  gap: 7px;
+  justify-content: space-between;
+  gap: 12px;
   padding: 8px 20px;
   background: rgba(37, 99, 235, 0.1);
   color: var(--accent);
   font-size: 12.5px;
+  line-height: 1.4;
   border-bottom: 1px solid var(--accent);
+  overflow: visible;
 }
-.workspace-banner svg {
+.workspace-banner-text {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.workspace-banner-icon {
   flex-shrink: 0;
+  font-size: 13px;
+  line-height: 1;
 }
 .workspace-banner-link {
   flex-shrink: 0;
@@ -74,6 +87,7 @@
   color: var(--accent);
   font-weight: 700;
   text-decoration: underline;
+  white-space: nowrap;
 }
 .workspace-banner-link:hover {
   opacity: 0.8;
@@ -3693,56 +3707,118 @@ tbody tr:hover .row-edit-btn,
   flex-shrink: 0;
 }
 
-/* ===== Toast stack ===== */
+/* ===== Toast stack =====
+   Deliberately NOT theme-reactive (no var(--text-primary) etc.) -- these
+   are fixed white cards with slate text regardless of the app's own
+   light/dark tokens, per the agreed design. Centered under the header so a
+   toast never covers the avatar/Share button in the header's top-right. */
 .toast-stack {
   position: fixed;
-  top: 20px;
-  right: 20px;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 1100;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  max-width: 340px;
+  align-items: center;
+  gap: 8px;
+  width: min(480px, calc(100% - 32px));
 }
 .toast {
   display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 320px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+  overflow: hidden;
+  animation: toast-enter 220ms ease-out both;
+}
+.toast-closing {
+  animation: toast-exit 180ms ease-in both;
+}
+@keyframes toast-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes toast-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+}
+.toast-row {
+  display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 12px 14px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: var(--shadow-md);
-  font-size: 13px;
-  animation: modal-scale-in 150ms ease-out;
+  padding: 12px 16px;
 }
 .toast-icon {
   flex-shrink: 0;
-  width: 18px;
-  height: 18px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
-  color: #fff;
 }
-.toast-success .toast-icon {
-  background: var(--good);
+.toast-icon-success {
+  background: #dcfce7;
+  color: #16a34a;
 }
-.toast-danger .toast-icon {
-  background: var(--critical);
+.toast-icon-info {
+  background: #dbeafe;
+  color: #2563eb;
 }
-.toast-warning .toast-icon {
-  background: var(--warning);
+.toast-icon-warning {
+  background: #fef3c7;
+  color: #d97706;
 }
-.toast-info .toast-icon {
-  background: var(--info);
+.toast-icon-danger {
+  background: #fee2e2;
+  color: #dc2626;
+}
+.toast-avatar {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  margin-top: 2px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--accent);
+}
+.toast-text {
+  flex: 1;
+  min-width: 0;
+}
+.toast-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
 }
 .toast-message {
-  flex: 1;
-  color: var(--text-primary);
+  font-size: 13px;
+  color: #64748b;
+  margin-top: 2px;
+  overflow-wrap: break-word;
+}
+.toast-controls {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding-top: 1px;
 }
 .toast-action {
@@ -3751,27 +3827,70 @@ tbody tr:hover .row-edit-btn,
   border: none;
   padding: 0;
   height: auto;
-  color: var(--accent);
+  color: #2563eb;
   font-size: 13px;
-  font-weight: 700;
-  text-decoration: underline;
+  font-weight: 600;
 }
 .toast-action:hover {
   background: none;
-  color: var(--accent-hover);
+  color: #1d4ed8;
+  text-decoration: underline;
 }
 .toast-close {
+  flex-shrink: 0;
   background: none;
   border: none;
   padding: 0;
   height: auto;
-  color: var(--text-muted);
+  width: 16px;
+  color: #94a3b8;
   font-size: 16px;
   line-height: 1;
 }
 .toast-close:hover {
   background: none;
-  color: var(--text-primary);
+  color: #334155;
+}
+.toast-progress-track {
+  height: 2px;
+  background: transparent;
+}
+.toast-progress-bar {
+  height: 100%;
+  width: 100%;
+  transform-origin: left;
+  animation-name: toast-progress-countdown;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+.toast:hover .toast-progress-bar,
+.toast:focus-within .toast-progress-bar {
+  animation-play-state: paused;
+}
+@keyframes toast-progress-countdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+.toast-progress-success {
+  background: #16a34a;
+}
+.toast-progress-info {
+  background: #2563eb;
+}
+.toast-progress-warning {
+  background: #d97706;
+}
+.toast-progress-danger {
+  background: #dc2626;
+}
+@media (max-width: 640px) {
+  .toast-stack {
+    top: 72px;
+  }
 }
 
 /* ===== Fullscreen Road Surface Diagram ===== */

@@ -8,18 +8,11 @@ export default function WorkspaceBanner({ context, onBackToMine }) {
 
   return (
     <div className="workspace-banner no-print">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path
-          d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
-      </svg>
-      <span>
-        Viewing {context.owner_name}&rsquo;s data · {roleLabel}
+      <span className="workspace-banner-text">
+        <span className="workspace-banner-icon" aria-hidden="true">
+          👁
+        </span>
+        Viewing {context.owner_name}&rsquo;s data &middot; {roleLabel}
       </span>
       <button type="button" className="workspace-banner-link" onClick={onBackToMine}>
         Back to my data
