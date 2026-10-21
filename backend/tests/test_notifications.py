@@ -38,6 +38,35 @@ def test_new_share_counts_as_one_unseen(client, make_user, as_user):
     assert item["role"] == "viewer"
 
 
+def test_fetching_notifications_repeatedly_never_marks_them_seen(client, make_user, as_user):
+    """Regression guard: GET /notifications (the 60s poll + the avatar badge)
+    must be a pure read -- only POST /notifications/seen is allowed to touch
+    seen_at. A toast fired off the SAME poll response must not have any way
+    to mark things seen just by having been shown; only closing the avatar
+    dropdown or switching into the workspace does that, both of which hit
+    the seen endpoints directly rather than piggybacking on this one."""
+    owner = make_user("Owner-N7", "owner-notif7@example.com")
+    recipient = make_user("Recipient-N7", "recipient-notif7@example.com")
+
+    with as_user(owner):
+        share_res = client.post(
+            "/api/workspace/shares", json={"email": "recipient-notif7@example.com", "role": "viewer"}
+        )
+    share_id = share_res.json()["id"]
+
+    _login_as(client, recipient)
+    for _ in range(5):
+        notif = client.get("/api/workspace/notifications").json()
+        assert notif["new_count"] == 1
+        item = next(i for i in notif["items"] if i["share_id"] == share_id)
+        assert item["is_new"] is True
+
+    # The explicit mark-seen endpoint still finds exactly one row to mark --
+    # proof none of the 5 GETs above already cleared it some other way.
+    seen_res = client.post("/api/workspace/notifications/seen", json={}).json()
+    assert seen_res["marked"] == 1
+
+
 def test_mark_seen_clears_the_count(client, make_user, as_user):
     owner = make_user("Owner-N2", "owner-notif2@example.com")
     recipient = make_user("Recipient-N2", "recipient-notif2@example.com")
