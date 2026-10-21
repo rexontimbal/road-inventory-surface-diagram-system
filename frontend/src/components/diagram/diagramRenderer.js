@@ -1,5 +1,5 @@
-import { fillForCell } from './surfacePatterns'
-import { formatDpwhStation, formatPlainStationLabel, isDpwhStyle } from '../../utils/chainage'
+import { fillForCell, getGravelPattern } from './surfacePatterns'
+import { formatDpwhStation, formatPlainStationLabel, isDpwhStyle, looksLikeDpwhText } from '../../utils/chainage'
 
 const BASE_STRIP_WIDTH_PX = 1200
 // Minimum horizontal space reserved per station-interval column so its tick
@@ -68,6 +68,14 @@ const GAP_CLOSE_THRESHOLD_PX = 3
 // deliberately-different look.
 const NODATA_BG = '#E3E6EA'
 const NODATA_HATCH = '#B7BEC7'
+// Thin dashed border drawn over a cell that's blank for a structural reason
+// (this station simply has fewer lanes than the strip's tallest segment, or
+// the shoulder is recorded as "none") -- distinguishes a deliberate "nothing
+// here" from a real missing-data gap (NODATA_BG/HATCH above) and from a
+// plain rendering seam. Matches SHOULDER_SWATCHES.none's dropdown swatch
+// border color so the canvas and the rest of the UI agree on what "none"
+// looks like.
+const NO_LANE_BORDER_COLOR = '#94a3b8'
 const MARKING_COLOR = 'rgba(255,255,255,0.75)'
 const ARROW_SPACING_PX = 70
 const MARKED_SURFACES = new Set(['asphalt', 'concrete']) // surfaces with painted lane markings
@@ -107,13 +115,18 @@ function getMeasureCtx() {
 // Measuring the actual widest terminal label (rather than assuming a flat
 // margin) keeps the reserved space exact: never so narrow it clips a long
 // label, never so wide it wastes space on a short one.
-function computeRightMargin(numStrips, baseM, stripSpanM, totalLengthM, labelFn) {
+function computeRightMargin(numStrips, baseM, stripSpanM, totalLengthM, labelFn, overallEndLabel) {
   if (numStrips === 0) return RIGHT_MARGIN_FALLBACK
   const ctx = getMeasureCtx()
   let maxWidth = 0
   for (let s = 0; s < numStrips; s++) {
     const stripEndM = Math.min(baseM + (s + 1) * stripSpanM, baseM + totalLengthM)
-    const w = ctx.measureText(labelFn(stripEndM)).width
+    // The very last strip's end tick may render the original range text
+    // (overallEndLabel) instead of labelFn's canonical one -- measure
+    // whichever text actually gets drawn there, not always the canonical
+    // form, so a longer original string can't clip against this margin.
+    const text = s === numStrips - 1 && overallEndLabel ? overallEndLabel : labelFn(stripEndM)
+    const w = ctx.measureText(text).width
     if (w > maxWidth) maxWidth = w
   }
   return Math.ceil(maxWidth / 2) + LABEL_EDGE_PADDING_PX
@@ -200,9 +213,22 @@ function computeStripPlan(road, settings, range) {
   const stripHeight = HEADER_H + STATUS_STRIP_H + SHOULDER_H + laneBandH + SHOULDER_H
   const stripWidthPx = Math.max(BASE_STRIP_WIDTH_PX, stationsPerLine * MIN_PX_PER_INTERVAL)
   const labelFn = stationLabelFormatter(road)
-  const rightMargin = computeRightMargin(numStrips, baseM, stripSpanM, totalLengthM, labelFn)
+
+  // The overall range's start/end labels prefer the ORIGINAL typed/record
+  // station text (e.g. "K1236 + (-848)") over the canonical floor()-derived
+  // one ("K1235 + 000") -- same preference formatStationRange already uses
+  // for the progress-bar/print-header range text, so the diagram's own edge
+  // labels read the same as those. Only DPWH-style sections have this
+  // negative-offset reference-point concept; plain-meter sections always
+  // use the normalized format, at every tick including the edges.
+  const isDpwh = isDpwhStyle(road)
+  const overallStartLabel = range && isDpwh && looksLikeDpwhText(range.startText) ? range.startText.trim() : null
+  const overallEndLabel = range && isDpwh && looksLikeDpwhText(range.endText) ? range.endText.trim() : null
+
+  const rightMargin = computeRightMargin(numStrips, baseM, stripSpanM, totalLengthM, labelFn, overallEndLabel)
   const canvasWidth = LEFT_MARGIN + stripWidthPx + rightMargin
   const canvasHeight = numStrips > 0 ? TOP_MARGIN + numStrips * stripHeight + (numStrips - 1) * STRIP_GAP + 10 : 0
+
   return {
     stripSpanM,
     totalLengthM,
@@ -217,6 +243,8 @@ function computeStripPlan(road, settings, range) {
     baseM,
     relevantSegments,
     labelFn,
+    overallStartLabel,
+    overallEndLabel,
   }
 }
 
@@ -305,6 +333,8 @@ export function renderSingleStrip(canvas, road, settings, stripIndex, range, sca
     hitRegions: [],
     scale: clampedScale,
     labelFn: plan.labelFn,
+    startLabelOverride: stripIndex === 0 ? plan.overallStartLabel : null,
+    endLabelOverride: stripIndex === plan.numStrips - 1 ? plan.overallEndLabel : null,
   })
 }
 
@@ -371,6 +401,8 @@ export function renderDiagram(canvas, road, settings, range, scale = 1) {
       hitRegions,
       scale: clampedScale,
       labelFn: plan.labelFn,
+      startLabelOverride: s === 0 ? plan.overallStartLabel : null,
+      endLabelOverride: s === numStrips - 1 ? plan.overallEndLabel : null,
     })
   }
 
@@ -391,6 +423,8 @@ function drawStrip(ctx, cfg) {
     hitRegions,
     scale,
     labelFn,
+    startLabelOverride,
+    endLabelOverride,
   } = cfg
 
   const statusStripY = y0 + HEADER_H
@@ -408,27 +442,61 @@ function drawStrip(ctx, cfg) {
   ctx.textAlign = 'left'
 
   // Station header ticks/labels -- meters converted to px from the same
-  // stripStartM origin used for the segment fills, so ticks and fills never drift apart.
-  // The tick mark is always drawn; the text label is only drawn when it fits
-  // without touching the previously-drawn label, so labels never overlap
-  // regardless of interval/range/font-metric combination.
+  // stripStartM origin used for the segment fills, so ticks and fills never
+  // drift apart. The tick mark is always drawn; the text label is only
+  // drawn when it fits without touching a neighboring label, so labels
+  // never overlap regardless of interval/range/font-metric combination.
+  //
+  // Tick *positions* are chosen in two tiers:
+  //  - Mandatory: the strip's own exact start and end (stripStartM/
+  //    stripEndM) -- almost never round numbers themselves (a station range
+  //    rarely starts/ends on a whole km-post), but always need their own
+  //    label so the viewer knows exactly what's at each edge.
+  //  - Optional: round multiples of stationIntervalM strictly between them
+  //    (e.g. every whole km for a 1km interval) -- these read naturally as
+  //    "the grid", unlike ticks offset by the range's own odd starting
+  //    remainder (the bug this replaces: K1235+152, K1236+152, ... instead
+  //    of K1236+000, K1237+000, ...).
+  // A round tick's label is dropped (not the tick mark) if it would collide
+  // with a neighboring label, so the two mandatory edge labels always win.
   ctx.strokeStyle = BORDER_COLOR
   ctx.fillStyle = '#000000'
+
+  const endX = px(x0 + (stripEndM - stripStartM) * pxPerMeter)
+  const endLabel = endLabelOverride || labelFn(stripEndM)
+  const endLabelLeft = endX - ctx.measureText(endLabel).width / 2
+
+  const ticks = [{ m: stripStartM, mandatory: true }]
+  const firstRoundM = Math.ceil(stripStartM / stationIntervalM) * stationIntervalM
+  for (let m = firstRoundM; m < stripEndM - MERGE_EPSILON_M; m += stationIntervalM) {
+    if (m > stripStartM + MERGE_EPSILON_M) ticks.push({ m, mandatory: false })
+  }
+  if (stripEndM > stripStartM + MERGE_EPSILON_M) ticks.push({ m: stripEndM, mandatory: true })
+
   let lastLabelRight = -Infinity
-  for (let m = stripStartM; m <= stripEndM; m += stationIntervalM) {
+  for (const tick of ticks) {
+    const { m, mandatory } = tick
+    const isFirst = m === stripStartM
+    const isLast = m === stripEndM && !isFirst
     const x = px(x0 + (m - stripStartM) * pxPerMeter)
     ctx.beginPath()
     ctx.moveTo(x, y0 + HEADER_H - 6)
     ctx.lineTo(x, y0 + HEADER_H)
     ctx.stroke()
 
-    const isFirst = m === stripStartM
-    const label = labelFn(m)
+    const label = isFirst && startLabelOverride ? startLabelOverride : isLast && endLabelOverride ? endLabelOverride : labelFn(m)
     const textWidth = ctx.measureText(label).width
     const labelLeft = isFirst ? x : x - textWidth / 2
     const labelRight = isFirst ? x + textWidth : x + textWidth / 2
+    const fitsBehindPrevious = labelLeft >= lastLabelRight + LABEL_MIN_GAP_PX
+    // Optional ticks must also leave room before the mandatory end label,
+    // even though that label hasn't been drawn yet (it's last in iteration
+    // order) -- without this look-ahead, a round tick just before the end
+    // could get drawn first and only THEN collide once the end label (which
+    // is never skipped) is placed on top of it.
+    const fitsBeforeEnd = isLast || labelRight + LABEL_MIN_GAP_PX <= endLabelLeft
 
-    if (isFirst || labelLeft >= lastLabelRight + LABEL_MIN_GAP_PX) {
+    if (mandatory || (fitsBehindPrevious && fitsBeforeEnd)) {
       ctx.save()
       ctx.textAlign = isFirst ? 'left' : 'center'
       ctx.fillText(label, x, y0 + HEADER_H / 2)
@@ -504,20 +572,29 @@ function drawStrip(ctx, cfg) {
 
     // Top shoulder
     paintCell(ctx, x, topShoulderY, fillW, SHOULDER_H, seg.shoulder_right, scale)
+    if (seg.shoulder_right === 'none') strokeEmptyBorder(ctx, x, topShoulderY, fillW, SHOULDER_H)
     if (MARKED_SURFACES.has(seg.shoulder_right)) {
       drawRumbleStrip(ctx, x, w, topShoulderY + SHOULDER_H, 'down')
     }
 
-    // Lane rows, centered within the global lane band
+    // Lane rows, centered within the global lane band -- rows outside
+    // [offset, offset+num_lanes) don't exist at this station (this segment
+    // has fewer lanes than the strip's tallest one), so they get the
+    // dashed "no lane" border instead of a surface fill.
     const offset = Math.floor((globalMaxLanes - seg.num_lanes) / 2)
-    for (let li = 0; li < seg.num_lanes; li++) {
-      const y = laneBandTop + (offset + li) * LANE_H
-      paintCell(ctx, x, y, fillW, LANE_H, seg.surface_type, scale)
+    for (let li = 0; li < globalMaxLanes; li++) {
+      const y = laneBandTop + li * LANE_H
+      if (li >= offset && li < offset + seg.num_lanes) {
+        paintCell(ctx, x, y, fillW, LANE_H, seg.surface_type, scale)
+      } else {
+        strokeEmptyBorder(ctx, x, y, fillW, LANE_H)
+      }
     }
 
     // Bottom shoulder
     const bottomShoulderY = laneBandTop + laneBandH
     paintCell(ctx, x, bottomShoulderY, fillW, SHOULDER_H, seg.shoulder_left, scale)
+    if (seg.shoulder_left === 'none') strokeEmptyBorder(ctx, x, bottomShoulderY, fillW, SHOULDER_H)
     if (MARKED_SURFACES.has(seg.shoulder_left)) {
       drawRumbleStrip(ctx, x, w, bottomShoulderY, 'up')
     }
@@ -538,8 +615,36 @@ function drawStrip(ctx, cfg) {
       h: columnH,
       segment: seg,
       isDone,
+      // Lets the tooltip tell a real lane/shoulder apart from the blank
+      // rows drawn above (strokeEmptyBorder) within this same hit region,
+      // without re-deriving the strip's row geometry from scratch.
+      rowLayout: { statusStripH: STATUS_STRIP_H, shoulderH: SHOULDER_H, laneH: LANE_H, laneBandH, offset },
     })
   }
+}
+
+// Given a hit region (as pushed above) and the hovered y in the SAME native
+// canvas coordinate space, returns which structurally-blank row (if any)
+// the pointer is over -- 'no-shoulder' | 'no-lane' | null. isNoData blocks
+// (real data gaps) don't carry rowLayout and are handled by the caller
+// separately, as before.
+export function hoveredEmptyRowType(region, ny) {
+  if (!region.rowLayout) return null
+  const { statusStripH, shoulderH, laneH, laneBandH, offset } = region.rowLayout
+  const relY = ny - region.y
+  if (relY < statusStripH) return null
+  const bandY = relY - statusStripH
+  if (bandY < shoulderH) {
+    return region.segment.shoulder_right === 'none' ? 'no-shoulder' : null
+  }
+  if (bandY < shoulderH + laneBandH) {
+    const laneIdx = Math.floor((bandY - shoulderH) / laneH)
+    return laneIdx < offset || laneIdx >= offset + region.segment.num_lanes ? 'no-lane' : null
+  }
+  if (bandY < shoulderH + laneBandH + shoulderH) {
+    return region.segment.shoulder_left === 'none' ? 'no-shoulder' : null
+  }
+  return null
 }
 
 // Flat, lightly hatched fill for a real (not visually-closed) gap in the
@@ -677,7 +782,147 @@ function drawArrowsAlong(ctx, x, w, y, pointsRight) {
   }
 }
 
+// ===== Legend panel, baked onto the exported PNG only =====
+// Export produces a single standalone image with no surrounding app chrome,
+// so (unlike normal/fullscreen/print, which all reuse the same <Legend/>
+// DOM component) it needs the legend drawn directly onto the canvas to be
+// self-explanatory on its own.
+const LEGEND_SWATCH_W = 20
+const LEGEND_SWATCH_H = 14
+const LEGEND_ITEM_GAP_PX = 20
+const LEGEND_LABEL_GAP_PX = 8
+const LEGEND_TITLE_H = 20
+const LEGEND_NOTE_H = 20
+const LEGEND_FONT = '12px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif'
+const LEGEND_NOTE_FONT = '11px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif'
+const LEGEND_TITLE_COLOR = '#334155'
+const LEGEND_NOTE_COLOR = '#64748b'
+
+function legendPanelItems() {
+  return [
+    { label: 'CONCRETE', draw: (ctx, x, y) => flatSwatch(ctx, x, y, '#9E9E9E') },
+    { label: 'ASPHALT', draw: (ctx, x, y) => flatSwatch(ctx, x, y, '#000000') },
+    {
+      label: 'GRAVEL',
+      draw: (ctx, x, y, scale) => {
+        ctx.fillStyle = getGravelPattern(ctx, scale)
+        ctx.fillRect(x, y, LEGEND_SWATCH_W, LEGEND_SWATCH_H)
+        ctx.strokeStyle = '#333333'
+        ctx.lineWidth = 1
+        ctx.strokeRect(x + 0.5, y + 0.5, LEGEND_SWATCH_W - 1, LEGEND_SWATCH_H - 1)
+      },
+    },
+    { label: 'EARTH', draw: (ctx, x, y) => flatSwatch(ctx, x, y, '#C8A165') },
+    {
+      label: 'NO LANE / NO SHOULDER',
+      draw: (ctx, x, y) => {
+        flatSwatch(ctx, x, y, '#FFFFFF')
+        strokeEmptyBorder(ctx, x, y, LEGEND_SWATCH_W, LEGEND_SWATCH_H)
+      },
+    },
+    { label: 'NO DATA (gap)', draw: (ctx, x, y) => drawNoDataFill(ctx, x, y, LEGEND_SWATCH_W, LEGEND_SWATCH_H) },
+  ]
+}
+
+function flatSwatch(ctx, x, y, color) {
+  ctx.fillStyle = color
+  ctx.fillRect(x, y, LEGEND_SWATCH_W, LEGEND_SWATCH_H)
+}
+
+// Lays out the fixed legend items into rows that fit `maxWidth`, wrapping
+// to a new row rather than overflowing or shrinking text -- independent of
+// drawing, so the composite export canvas can be sized correctly BEFORE
+// anything is actually painted onto it.
+function computeLegendLayout(maxWidth) {
+  const ctx = getMeasureCtx()
+  ctx.font = LEGEND_FONT
+  const rowH = LEGEND_SWATCH_H + 12
+  let x = 0
+  let row = 0
+  const placed = []
+  for (const item of legendPanelItems()) {
+    const textWidth = ctx.measureText(item.label).width
+    const itemWidth = LEGEND_SWATCH_W + LEGEND_LABEL_GAP_PX + textWidth
+    if (x > 0 && x + itemWidth > maxWidth) {
+      x = 0
+      row += 1
+    }
+    placed.push({ item, x, y: row * rowH })
+    x += itemWidth + LEGEND_ITEM_GAP_PX
+  }
+  const rows = row + 1
+  const bodyHeight = rows * rowH
+  return { placed, rowH, bodyHeight, totalHeight: LEGEND_TITLE_H + bodyHeight + LEGEND_NOTE_H }
+}
+
+// Total vertical space drawLegendPanel will need at this width -- call
+// before sizing the destination canvas.
+export function measureLegendPanelHeight(maxWidth) {
+  return computeLegendLayout(maxWidth).totalHeight
+}
+
+export function drawLegendPanel(ctx, x0, y0, maxWidth, scale = 1) {
+  const { placed, bodyHeight } = computeLegendLayout(maxWidth)
+  ctx.save()
+  ctx.textBaseline = 'alphabetic'
+  ctx.font = LEGEND_FONT
+  ctx.fillStyle = LEGEND_TITLE_COLOR
+  ctx.fillText('LEGEND', x0, y0 + 12)
+
+  const bodyY = y0 + LEGEND_TITLE_H
+  for (const { item, x, y } of placed) {
+    item.draw(ctx, x0 + x, bodyY + y, scale)
+    ctx.font = LEGEND_FONT
+    ctx.fillStyle = LEGEND_TITLE_COLOR
+    ctx.textBaseline = 'middle'
+    ctx.fillText(item.label, x0 + x + LEGEND_SWATCH_W + LEGEND_LABEL_GAP_PX, bodyY + y + LEGEND_SWATCH_H / 2)
+  }
+
+  ctx.textBaseline = 'alphabetic'
+  ctx.font = LEGEND_NOTE_FONT
+  ctx.fillStyle = LEGEND_NOTE_COLOR
+  ctx.fillText('Green/red line above each strip = asphalted / not asphalted.', x0, bodyY + bodyHeight + 14)
+  ctx.restore()
+}
+
+// Returns a NEW canvas containing `sourceCanvas`'s own content with the
+// legend panel appended below -- doesn't touch sourceCanvas or any of the
+// core strip-rendering path above, so normal/fullscreen/print render
+// exactly as before; only the PNG export call site uses this.
+export function appendLegendBelow(sourceCanvas, scale = 1) {
+  const logicalWidth = sourceCanvas.width / scale
+  const logicalHeight = sourceCanvas.height / scale
+  const legendMaxWidth = Math.max(100, logicalWidth - LEFT_MARGIN)
+  const legendHeight = measureLegendPanelHeight(legendMaxWidth) + 16
+
+  const out = document.createElement('canvas')
+  out.width = sourceCanvas.width
+  out.height = Math.round((logicalHeight + legendHeight) * scale)
+  const ctx = out.getContext('2d')
+  ctx.setTransform(scale, 0, 0, scale, 0, 0)
+  ctx.fillStyle = '#FFFFFF'
+  ctx.fillRect(0, 0, logicalWidth, logicalHeight + legendHeight)
+  ctx.drawImage(sourceCanvas, 0, 0, logicalWidth, logicalHeight)
+  drawLegendPanel(ctx, LEFT_MARGIN, logicalHeight + 6, legendMaxWidth, scale)
+  return out
+}
+
 function paintCell(ctx, x, y, w, h, surfaceType, scale = 1) {
   ctx.fillStyle = fillForCell(ctx, surfaceType, x, y, w, h, scale)
   ctx.fillRect(x, y, w, h)
+}
+
+// Thin dashed outline marking a cell as deliberately blank -- a lane row
+// that doesn't exist at this station (narrower segment than the strip's
+// tallest), or a shoulder recorded as "none". The cell itself is already
+// white (either from paintCell's own 'none' fill, or from the canvas's own
+// base white fill for lane rows that are never painted at all), so this
+// only needs to add the border, not re-fill.
+function strokeEmptyBorder(ctx, x, y, w, h) {
+  ctx.save()
+  ctx.strokeStyle = NO_LANE_BORDER_COLOR
+  ctx.lineWidth = 1
+  ctx.setLineDash([4, 3])
+  ctx.strokeRect(x + 0.5, y + 0.5, Math.max(w - 1, 0), Math.max(h - 1, 0))
+  ctx.restore()
 }

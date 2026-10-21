@@ -1,5 +1,13 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { renderDiagram, renderSingleStrip, getNumStrips, getRowLabelLayout, getCanvasLogicalSize } from './diagramRenderer'
+import {
+  renderDiagram,
+  renderSingleStrip,
+  getNumStrips,
+  getRowLabelLayout,
+  getCanvasLogicalSize,
+  hoveredEmptyRowType,
+  appendLegendBelow,
+} from './diagramRenderer'
 import { formatFilenameRangeSuffix, formatStationRange } from '../../utils/chainage'
 import Legend from './Legend'
 import DiagramFullscreen from './DiagramFullscreen'
@@ -202,9 +210,13 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
     const exportCanvas = document.createElement('canvas')
     const result = renderDiagram(exportCanvas, road.roadDetail, road.settings, road.range, EXPORT_SCALE)
     if (!result || exportCanvas.width === 0) return
+    // Bakes the legend below the diagram -- unlike normal/fullscreen/print,
+    // a standalone exported PNG has no surrounding app chrome to explain
+    // the fills otherwise.
+    const finalCanvas = appendLegendBelow(exportCanvas, EXPORT_SCALE)
     const link = document.createElement('a')
     link.download = `${road.roadDetail.section_id}${rangeSuffix()}.png`
-    link.href = exportCanvas.toDataURL('image/png')
+    link.href = finalCanvas.toDataURL('image/png')
     link.click()
   }
 
@@ -230,6 +242,7 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
       clientY: e.clientY,
       segment: region.segment,
       isDone: region.isDone,
+      emptyRow: region.segment.isNoData ? null : hoveredEmptyRowType(region, ny),
     })
   }
 
@@ -358,13 +371,18 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
           </div>
         )}
       </div>
-      <Legend />
+      <div className="no-print">
+        <Legend />
+      </div>
 
       {/* Print-only: one canvas per strip, packed onto pages naturally (the
           browser fits as many whole strips per page as it can, then
           continues on the next page) -- kept out of the normal layout
           (.print-strips is display:none) and shown only under @media print,
-          replacing #diagram-canvas there. */}
+          replacing #diagram-canvas there. The legend repeats here (instead
+          of just reusing the onscreen one) because that one lives outside
+          .print-strips and stays hidden for print like the rest of the
+          app's chrome. */}
       {hasGenerated && (
         <div className="print-strips">
           {Array.from({ length: numStrips }).map((_, i) => (
@@ -385,6 +403,9 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
               <canvas ref={(el) => (printCanvasRefs.current[i] = el)} />
             </div>
           ))}
+          <div className="print-legend">
+            <Legend />
+          </div>
         </div>
       )}
 
@@ -404,7 +425,17 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
           </div>
         </div>
       )}
-      {tooltip && !tooltip.segment.isNoData && (
+      {tooltip && !tooltip.segment.isNoData && tooltip.emptyRow && (
+        <div
+          className="diagram-tooltip no-print"
+          style={{ left: tooltip.clientX + 14, top: tooltip.clientY + 14 }}
+        >
+          <div className="tooltip-status tooltip-empty-row">
+            {tooltip.emptyRow === 'no-lane' ? 'No lane at this station' : 'No shoulder (None)'}
+          </div>
+        </div>
+      )}
+      {tooltip && !tooltip.segment.isNoData && !tooltip.emptyRow && (
         <div
           className="diagram-tooltip no-print"
           style={{ left: tooltip.clientX + 14, top: tooltip.clientY + 14 }}

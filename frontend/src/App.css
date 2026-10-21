@@ -2230,6 +2230,13 @@ tbody tr:hover .row-edit-btn,
 .print-strips {
   display: none;
 }
+/* Shown only when printing (the onscreen Legend lives outside .print-strips
+   and is separately hidden via its own no-print wrapper) -- this copy
+   prints once, after the last strip page, so Print/PDF output still
+   explains the fills even though the rest of the app's chrome doesn't print. */
+.print-legend {
+  display: none;
+}
 
 .completion-summary {
   display: flex;
@@ -2345,6 +2352,12 @@ tbody tr:hover .row-edit-btn,
 }
 .tooltip-nodata {
   color: var(--text-muted);
+}
+.tooltip-empty-row {
+  color: var(--text-muted);
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
 }
 .tooltip-row {
   display: flex;
@@ -2542,6 +2555,11 @@ tbody tr:hover .row-edit-btn,
   border: 1px solid var(--border-strong);
   border-radius: 2px;
 }
+.legend-note {
+  margin-top: 8px;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
 
 @media print {
   @page {
@@ -2562,8 +2580,7 @@ tbody tr:hover .row-edit-btn,
   .app-header,
   .network-summary-wrap,
   .panel-header-row,
-  .diagram-panel .hint,
-  .legend {
+  .diagram-panel .hint {
     display: none !important;
   }
 
@@ -2610,6 +2627,12 @@ tbody tr:hover .row-edit-btn,
   }
   .print-strips {
     display: block !important;
+  }
+  .print-legend {
+    display: block !important;
+    margin-top: 4mm;
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
   /* Each strip keeps its natural (non-stretched) proportions and is an
      unbreakable block -- the browser packs as many whole strips as fit on a

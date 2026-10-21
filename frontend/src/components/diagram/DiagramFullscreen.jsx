@@ -3,7 +3,7 @@ import { formatStationRange } from '../../utils/chainage'
 import Legend from './Legend'
 import { useModalLayer } from '../common/useModalLayer'
 import { useDevicePixelRatio } from '../../utils/useDevicePixelRatio'
-import { renderDiagram, getCanvasLogicalSize } from './diagramRenderer'
+import { renderDiagram, getCanvasLogicalSize, hoveredEmptyRowType } from './diagramRenderer'
 import ProgressBar from '../common/ProgressBar'
 
 const ZOOM_MIN = 0.25
@@ -252,7 +252,13 @@ export default function DiagramFullscreen({ road, completion, onClose, onPrint, 
       setTooltip(null)
       return
     }
-    setTooltip({ clientX: e.clientX, clientY: e.clientY, segment: region.segment, isDone: region.isDone })
+    setTooltip({
+      clientX: e.clientX,
+      clientY: e.clientY,
+      segment: region.segment,
+      isDone: region.isDone,
+      emptyRow: region.segment.isNoData ? null : hoveredEmptyRowType(region, ny),
+    })
   }
 
   // Clamped so the tooltip can never render partly off-screen, unlike the
@@ -366,7 +372,14 @@ export default function DiagramFullscreen({ road, completion, onClose, onPrint, 
           </div>
         </div>
       )}
-      {tooltip && !tooltip.segment.isNoData && (
+      {tooltip && !tooltip.segment.isNoData && tooltip.emptyRow && (
+        <div className="diagram-tooltip no-print" style={tooltipStyle(tooltip)}>
+          <div className="tooltip-status tooltip-empty-row">
+            {tooltip.emptyRow === 'no-lane' ? 'No lane at this station' : 'No shoulder (None)'}
+          </div>
+        </div>
+      )}
+      {tooltip && !tooltip.segment.isNoData && !tooltip.emptyRow && (
         <div className="diagram-tooltip no-print" style={tooltipStyle(tooltip)}>
           <div className={`tooltip-status ${tooltip.isDone ? 'tooltip-done' : 'tooltip-not-done'}`}>
             {tooltip.isDone ? '✓ Asphalted' : '✕ Not yet asphalted'}

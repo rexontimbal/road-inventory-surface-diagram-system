@@ -46,7 +46,7 @@ export function extractKmPost(raw) {
   return m ? parseInt(m[1], 10) : null
 }
 
-function looksLikeDpwhText(raw) {
+export function looksLikeDpwhText(raw) {
   if (raw == null) return false
   const s = String(raw).trim()
   return K_STATION_RE.test(s) || CHAINAGE_RE.test(s)
