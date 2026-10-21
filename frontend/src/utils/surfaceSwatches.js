@@ -19,9 +19,9 @@ export const SHOULDER_SWATCHES = {
 // doesn't exist at this station vs. a real gap in the recorded data) read
 // as deliberate, distinct states instead of looking like the same thing or
 // a rendering glitch.
+// Legend-only border -- the diagram canvas itself draws these cells as
+// plain white with no border (see diagramRenderer.js's drawStrip).
 export const NO_LANE_SWATCH = { background: '#FFFFFF', border: '1px dashed #94a3b8' }
-export const NO_DATA_SWATCH = {
-  background: '#E3E6EA',
-  backgroundImage: 'repeating-linear-gradient(45deg, transparent 0 4px, #B7BEC7 4px 5px)',
-  backgroundSize: '8px 8px',
-}
+// Flat, not hatched -- a hatch pattern is GRAVEL's look, and this needs to
+// read as calmly "nothing recorded" rather than another material.
+export const NO_DATA_SWATCH = { background: '#eef2f7' }

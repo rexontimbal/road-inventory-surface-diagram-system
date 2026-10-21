@@ -61,20 +61,18 @@ const SEAM_OVERLAP_PX = 1
 // that block's tooltip are untouched; only the drawn rectangle widens.
 const GAP_CLOSE_THRESHOLD_M = 50
 const GAP_CLOSE_THRESHOLD_PX = 3
-// A gap that isn't closed (see above) is drawn as its own flat, hatched
-// "no data" block instead of leaving the white canvas background showing
-// through -- that bare white was indistinguishable from the seam artifact
-// this whole fix removes, so a real missing-data gap needs its own
-// deliberately-different look.
-const NODATA_BG = '#E3E6EA'
-const NODATA_HATCH = '#B7BEC7'
-// Thin dashed border drawn over a cell that's blank for a structural reason
-// (this station simply has fewer lanes than the strip's tallest segment, or
-// the shoulder is recorded as "none") -- distinguishes a deliberate "nothing
-// here" from a real missing-data gap (NODATA_BG/HATCH above) and from a
-// plain rendering seam. Matches SHOULDER_SWATCHES.none's dropdown swatch
-// border color so the canvas and the rest of the UI agree on what "none"
-// looks like.
+// A gap that isn't closed (see above) is drawn as its own flat "no data"
+// block instead of leaving the white canvas background showing through --
+// that bare white was indistinguishable from the seam artifact this whole
+// fix removes, so a real missing-data gap needs its own deliberately-
+// different look. A flat light blue-gray (not a hatch, which is reserved
+// for GRAVEL) keeps it visually calm against the busy lane markings.
+const NODATA_BG = '#eef2f7'
+// Legend-only border color for the "NO LANE / NO SHOULDER" swatch -- the
+// diagram canvas itself draws these cells as plain white with no border
+// (a dashed outline around every such cell, repeated across every strip,
+// read as distracting vertical lines rather than a deliberate "blank"
+// state). Matches SHOULDER_SWATCHES.none's dropdown swatch border color.
 const NO_LANE_BORDER_COLOR = '#94a3b8'
 const MARKING_COLOR = 'rgba(255,255,255,0.75)'
 const ARROW_SPACING_PX = 70
@@ -570,31 +568,29 @@ function drawStrip(ctx, cfg) {
     ctx.fillStyle = isDone ? STATUS_DONE_COLOR : STATUS_NOT_DONE_COLOR
     ctx.fillRect(x, statusStripY, fillW, STATUS_STRIP_H)
 
-    // Top shoulder
+    // Top shoulder -- a "none" shoulder already paints plain white via
+    // paintCell (SURFACE_COLORS.none); no border is drawn over it (that
+    // repeated, once per segment across every strip, as distracting
+    // vertical lines rather than reading as a deliberate blank state).
     paintCell(ctx, x, topShoulderY, fillW, SHOULDER_H, seg.shoulder_right, scale)
-    if (seg.shoulder_right === 'none') strokeEmptyBorder(ctx, x, topShoulderY, fillW, SHOULDER_H)
     if (MARKED_SURFACES.has(seg.shoulder_right)) {
       drawRumbleStrip(ctx, x, w, topShoulderY + SHOULDER_H, 'down')
     }
 
     // Lane rows, centered within the global lane band -- rows outside
     // [offset, offset+num_lanes) don't exist at this station (this segment
-    // has fewer lanes than the strip's tallest one), so they get the
-    // dashed "no lane" border instead of a surface fill.
+    // has fewer lanes than the strip's tallest one) and are simply left
+    // unpainted, showing the canvas's own white background.
     const offset = Math.floor((globalMaxLanes - seg.num_lanes) / 2)
     for (let li = 0; li < globalMaxLanes; li++) {
+      if (li < offset || li >= offset + seg.num_lanes) continue
       const y = laneBandTop + li * LANE_H
-      if (li >= offset && li < offset + seg.num_lanes) {
-        paintCell(ctx, x, y, fillW, LANE_H, seg.surface_type, scale)
-      } else {
-        strokeEmptyBorder(ctx, x, y, fillW, LANE_H)
-      }
+      paintCell(ctx, x, y, fillW, LANE_H, seg.surface_type, scale)
     }
 
     // Bottom shoulder
     const bottomShoulderY = laneBandTop + laneBandH
     paintCell(ctx, x, bottomShoulderY, fillW, SHOULDER_H, seg.shoulder_left, scale)
-    if (seg.shoulder_left === 'none') strokeEmptyBorder(ctx, x, bottomShoulderY, fillW, SHOULDER_H)
     if (MARKED_SURFACES.has(seg.shoulder_left)) {
       drawRumbleStrip(ctx, x, w, bottomShoulderY, 'up')
     }
@@ -647,27 +643,16 @@ export function hoveredEmptyRowType(region, ny) {
   return null
 }
 
-// Flat, lightly hatched fill for a real (not visually-closed) gap in the
-// station data -- deliberately distinct from both the plain-white canvas
-// background and every real surface color/pattern, so it reads as "nothing
-// recorded here" rather than either a rendering seam or an actual surface.
+// Flat fill for a real (not visually-closed) gap in the station data --
+// deliberately distinct from both the plain-white canvas background and
+// every real surface color/pattern, so it reads as "nothing recorded here"
+// rather than either a rendering seam or an actual surface. Flat, not
+// hatched -- a hatch pattern is GRAVEL's look, and a border would repeat as
+// a visible vertical line across every strip, same reason blank lane/
+// shoulder cells don't get one either.
 function drawNoDataFill(ctx, x, y, w, h) {
   ctx.fillStyle = NODATA_BG
   ctx.fillRect(x, y, w, h)
-  ctx.save()
-  ctx.beginPath()
-  ctx.rect(x, y, w, h)
-  ctx.clip()
-  ctx.strokeStyle = NODATA_HATCH
-  ctx.lineWidth = 1
-  const step = 10
-  for (let lx = x - h; lx < x + w; lx += step) {
-    ctx.beginPath()
-    ctx.moveTo(lx, y + h)
-    ctx.lineTo(lx + h, y)
-    ctx.stroke()
-  }
-  ctx.restore()
 }
 
 // Real-road-style paint markings: solid white edge lines at the shoulder
