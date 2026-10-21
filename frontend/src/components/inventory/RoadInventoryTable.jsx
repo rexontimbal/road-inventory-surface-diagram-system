@@ -123,6 +123,7 @@ export default function RoadInventoryTable({
   sort,
   onSortChange,
   onSegmentEdited,
+  canEdit = true,
 }) {
   const records = segmentsPage?.records || []
   const hasActiveFilters = !!(
@@ -762,15 +763,16 @@ export default function RoadInventoryTable({
                             className="row-action-btn row-action-save"
                             onClick={() => saveEdit(r)}
                             disabled={saving}
-                            title="Save"
-                            aria-label="Save"
+                            title={saving ? 'Saving…' : 'Save'}
+                            aria-label={saving ? 'Saving…' : 'Save'}
                           >
-                            ✓
+                            {saving ? <span className="spinner spinner-row-action" /> : '✓'}
                           </button>
                           <button
                             type="button"
                             className="row-action-btn row-action-cancel"
                             onClick={cancelEdit}
+                            disabled={saving}
                             title="Cancel"
                             aria-label="Cancel"
                           >
@@ -785,9 +787,10 @@ export default function RoadInventoryTable({
                             if (el) editBtnRefs.current.set(r.id, el)
                             else editBtnRefs.current.delete(r.id)
                           }}
-                          onClick={() => startEdit(r)}
-                          title="Edit segment"
-                          aria-label="Edit segment"
+                          onClick={() => canEdit && startEdit(r)}
+                          disabled={!canEdit}
+                          title={canEdit ? 'Edit segment' : 'View-only access'}
+                          aria-label={canEdit ? 'Edit segment' : 'View-only access'}
                         >
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                             <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />

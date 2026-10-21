@@ -45,6 +45,13 @@ export default function DialogProvider({ children }) {
   // Per-toast countdown state, keyed by toast id -- lets hover pause/resume
   // the auto-dismiss timer without re-rendering the toast list on every tick.
   const toastTimers = useRef(new Map())
+  // Mirrors `toasts` for _toastHandler to read synchronously -- that handler
+  // is assigned once in a []-deps effect below, so closing over `toasts`
+  // directly would always see the initial empty array, never a later one.
+  const toastsRef = useRef([])
+  useEffect(() => {
+    toastsRef.current = toasts
+  }, [toasts])
   // Re-renders on every fullscreen enter/exit so the toast portal below
   // (which otherwise might not re-render around that exact moment) always
   // targets the current getFullscreenPortalRoot() -- a toast fired while
@@ -67,6 +74,15 @@ export default function DialogProvider({ children }) {
     _confirmHandler = (opts) => setConfirmState(opts)
     _alertHandler = (opts) => setAlertState(opts)
     _toastHandler = (opts) => {
+      const variant = opts.variant ?? 'info'
+      // Dedupe against whatever's already on screen -- a caller that fires
+      // the same failure 2-3 times in a row (a double-click, a retry, the
+      // same error surfacing from more than one place) shows ONE toast, not
+      // a stack of identical ones. Scoped to currently-visible toasts, which
+      // already bounds this to "the last few seconds" since toasts
+      // auto-dismiss on their own.
+      const isDuplicate = toastsRef.current.some((t) => t.variant === variant && t.message === opts.message)
+      if (isDuplicate) return
       const id = `${Date.now()}-${Math.random()}`
       const duration = opts.duration ?? 3000
       setToasts((t) => [...t, { id, variant: 'info', ...opts }])

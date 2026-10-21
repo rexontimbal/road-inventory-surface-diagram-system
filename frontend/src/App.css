@@ -52,6 +52,38 @@
   }
 }
 
+.workspace-banner {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 20px;
+  background: rgba(37, 99, 235, 0.1);
+  color: var(--accent);
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--accent);
+}
+.workspace-banner svg {
+  flex-shrink: 0;
+}
+.workspace-banner-link {
+  flex-shrink: 0;
+  margin-left: auto;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: underline;
+}
+.workspace-banner-link:hover {
+  opacity: 0.8;
+}
+@media print {
+  .workspace-banner {
+    display: none;
+  }
+}
+
 /* Reusable thin, blue-tinted scrollbar for scrollable panels throughout
    the app (upload summary, inventory table, diagram wrap, chip rows).
    The scrollbar-width/-color pair below is gated to browsers without
@@ -394,6 +426,44 @@
 }
 .user-menu-item-danger:hover {
   background: var(--critical-soft);
+}
+.user-menu-section-label {
+  padding: 6px 10px 2px;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.user-menu-workspace-item {
+  display: flex;
+  align-items: center;
+  /* The global `button { justify-content: center }` reset only mattered
+     once this rule switched the item from .user-menu-item's plain
+     display:block to flex -- without overriding it back to flex-start here,
+     "My data" (short enough for the centering to be obvious) rendered as a
+     centered pill instead of a left-aligned row like every other item. */
+  justify-content: flex-start;
+  gap: 6px;
+}
+.user-menu-workspace-check {
+  flex-shrink: 0;
+  width: 14px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+.user-menu-workspace-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.user-menu-workspace-item[aria-checked='true'] {
+  font-weight: 600;
+}
+.user-menu-workspace-role {
+  color: var(--text-muted);
+  font-weight: 400;
 }
 @media (max-width: 768px) {
   .user-menu-name {
@@ -1183,6 +1253,11 @@ button:focus-visible {
   border-top-color: #fff;
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
+}
+.spinner-row-action {
+  width: 11px;
+  height: 11px;
+  border-width: 1.5px;
 }
 @keyframes spin {
   to {
@@ -2978,6 +3053,149 @@ tbody tr:hover .row-edit-btn,
 .network-chip-complete:hover {
   background: var(--good-border);
   color: var(--good);
+}
+
+/* ===== Share modal ===== */
+.share-modal-card {
+  max-width: 480px;
+  width: 100%;
+}
+.share-invite-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.share-email-input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.share-email-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+.share-role-select {
+  width: 100px;
+  flex-shrink: 0;
+}
+.share-btn {
+  flex-shrink: 0;
+}
+.share-people-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.share-people-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.share-person-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.share-person-row:last-child {
+  border-bottom: none;
+}
+.share-avatar {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--accent);
+}
+.share-avatar-initials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+.share-avatar-pending {
+  background: var(--text-muted);
+}
+.share-person-identity {
+  flex: 1;
+  min-width: 0;
+}
+.share-person-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-person-email {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-owner-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 2px 8px;
+}
+.share-pending-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--warning);
+  background: var(--warning-soft);
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+.share-remove-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.share-remove-btn:hover {
+  background: var(--critical-soft);
+  color: var(--critical);
+}
+.share-empty {
+  padding: 24px 4px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
 }
 
 /* ===== Upload History modal ===== */

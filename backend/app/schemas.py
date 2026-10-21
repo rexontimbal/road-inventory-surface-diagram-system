@@ -25,6 +25,58 @@ class GuestStatusOut(BaseModel):
     expires_at: str | None = None
 
 
+class ShareIn(BaseModel):
+    email: str
+    role: Literal["viewer", "editor"]
+
+
+class ShareRoleIn(BaseModel):
+    role: Literal["viewer", "editor"]
+
+
+class ShareOut(BaseModel):
+    id: int
+    email: str
+    role: Literal["viewer", "editor"]
+    name: str | None = None
+    avatar_url: str | None = None
+    pending: bool
+
+
+class ShareOwnerOut(BaseModel):
+    user_id: int
+    name: str
+    email: str
+    avatar_url: str | None = None
+
+
+class SharesListOut(BaseModel):
+    owner: ShareOwnerOut
+    people: list[ShareOut]
+
+
+class WorkspaceSwitchIn(BaseModel):
+    # None (or omitted) switches back to the caller's own workspace.
+    owner_user_id: int | None = None
+
+
+class SharedWorkspaceOut(BaseModel):
+    owner_user_id: int
+    owner_name: str
+    owner_email: str
+    owner_avatar_url: str | None = None
+    role: Literal["viewer", "editor"]
+
+
+class WorkspaceContextOut(BaseModel):
+    mode: Literal["own", "shared"]
+    role: Literal["owner", "editor", "viewer"]
+    owner_user_id: int | None = None
+    owner_name: str | None = None
+    owner_email: str | None = None
+    shared_with_me: list[SharedWorkspaceOut]
+
+
 class RoadSummary(BaseModel):
     section_id: str
     road_name: str
@@ -187,7 +239,7 @@ class LogRoadDetail(BaseModel):
 class UploadLogOut(BaseModel):
     id: int
     timestamp: str
-    kind: Literal["upload", "delete", "restore", "edit"]
+    kind: Literal["upload", "delete", "restore", "edit", "share"]
     status: Literal["completed", "cancelled", "failed"]
     file_name: str | None
     file_size: int | None

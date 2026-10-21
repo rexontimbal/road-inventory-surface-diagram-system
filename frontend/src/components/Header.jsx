@@ -81,6 +81,9 @@ const Header = forwardRef(function Header(
     onGoogleCredential,
     onSignOut,
     onOpenHistory,
+    workspaceContext,
+    onSwitchWorkspace,
+    onOpenShare,
   },
   ref
 ) {
@@ -88,6 +91,10 @@ const Header = forwardRef(function Header(
   const [signInOpen, setSignInOpen] = useState(false)
   const shrunkRef = useRef(false)
   const tickingRef = useRef(false)
+  // Sharing always operates on the CALLER's own workspace (see
+  // app/routers/workspace.py) -- the button only makes sense while viewing
+  // your own data, not someone else's shared-with-you workspace.
+  const canShare = authUser && workspaceContext?.mode === 'own'
 
   // Lets GuestNotice's "Sign in" link (a sibling of Header, not a child)
   // open this same modal instead of duplicating sign-in UI elsewhere.
@@ -195,10 +202,30 @@ const Header = forwardRef(function Header(
           >
             ?
           </button>
+          {canShare && (
+            <button type="button" className="btn-compact header-share-btn" onClick={onOpenShare}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path
+                  d="M16 6a3 3 0 1 0-2.83-4H13A3 3 0 1 0 16 6ZM6 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm12 6a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM8.6 13.5l6.8-3.9M8.6 14.5l6.8 3.9"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              Share
+            </button>
+          )}
           {!authChecked ? (
             <span className="header-auth-skeleton" aria-hidden="true" />
           ) : authUser ? (
-            <UserMenu user={authUser} onSignOut={onSignOut} onOpenHistory={onOpenHistory} />
+            <UserMenu
+              user={authUser}
+              onSignOut={onSignOut}
+              onOpenHistory={onOpenHistory}
+              workspaceContext={workspaceContext}
+              onSwitchWorkspace={onSwitchWorkspace}
+            />
           ) : (
             <button type="button" className="header-signin-btn" onClick={() => setSignInOpen(true)}>
               <svg className="header-signin-btn-icon" width="16" height="16" viewBox="0 0 48 48" aria-hidden="true">

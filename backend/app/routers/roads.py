@@ -14,7 +14,7 @@ from app.db import get_db
 from app.chainage import summarize_warnings
 from app.excel_import import ImportResult, TemplateError, parse_upload
 from app.models import SHOULDER_TYPES, SURFACE_TYPES, Road, RoadSegment, UploadLogEntry  # noqa: F401 -- UploadLogEntry import registers the table for create_all
-from app.scope import Scope, apply_scope, get_scope, owner_kwargs, user_kwargs
+from app.scope import Scope, apply_scope, get_scope, owner_kwargs, require_editor, require_owner, user_kwargs
 from app.schemas import (
     FilteredSegmentsSummary,
     LaneCountsOut,
@@ -204,6 +204,7 @@ async def upload_preview(file: UploadFile, db: Session = Depends(get_db), scope:
     "Existing" only ever means within the caller's own scope -- a guest's
     upload can never conflict with (or even see) the shared workspace's
     roads, and vice versa."""
+    require_editor(scope)
     contents = await file.read()
     try:
         result = parse_upload(contents)
@@ -281,6 +282,7 @@ def upload_commit(body: UploadCommitIn, db: Session = Depends(get_db), scope: Sc
     not one ORM object + db.add() per row) -- a real DPWH file runs to
     ~11,200 rows, and per-row ORM object construction/flush tracking is the
     bottleneck at that volume."""
+    require_editor(scope)
     _prune_pending_uploads()
     entry = _PENDING_UPLOADS.pop(body.token, None)
     if entry is None:
@@ -446,6 +448,7 @@ def upload_cancel(body: UploadCancelIn, db: Session = Depends(get_db), scope: Sc
     """Logs a cancelled upload (whatever the preview found, nothing applied)
     and discards the pending token. Safe to call even if the token already
     expired -- still logs a minimal cancelled entry."""
+    require_editor(scope)
     _prune_pending_uploads()
     entry = _PENDING_UPLOADS.pop(body.token, None)
 
@@ -584,6 +587,7 @@ def edit_segment(
     segments; those still require a full Excel re-upload). Any actual change
     bumps the parent road's updated_at and writes one 'edit' log entry so
     there's an audit trail, same as every other data-changing action."""
+    require_editor(scope)
     # id alone is globally unique (not part of the scoping key), so without
     # the scope filter a guest could edit another scope's segment just by
     # guessing/incrementing an id -- scoped out here means "not found",
@@ -651,6 +655,8 @@ def edit_segment(
             road_name=road.road_name,
             start_station=seg.start_text,
             end_station=seg.end_text,
+            length_m=seg.length_m,
+            irregular_km_post=seg.irregular_km_post,
             num_lanes=seg.num_lanes,
             surface_type=seg.surface_type,
             shoulder_left=seg.shoulder_left,
@@ -905,6 +911,10 @@ def export_upload_log(
 
 @router.delete("/upload-log")
 def clear_upload_log(db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
+    # Owner-only, not just Editor -- this wipes the whole audit trail in one
+    # shot, including every OTHER collaborator's history, not just one
+    # section's data.
+    require_owner(scope)
     count = apply_scope(db.query(UploadLogEntry), UploadLogEntry, scope).delete()
     db.commit()
     return {"cleared": count}
@@ -946,6 +956,7 @@ def get_road_detail(section_id: str, db: Session = Depends(get_db), scope: Scope
 
 @router.delete("/{section_id}")
 def delete_road(section_id: str, db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
+    require_editor(scope)
     road = apply_scope(db.query(Road), Road, scope).filter(Road.section_id == section_id).first()
     if road is None:
         raise HTTPException(status_code=404, detail=f"Section '{section_id}' not found")

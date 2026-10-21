@@ -15,6 +15,7 @@ export default function SectionSelectPanel({
   ld,
   onDelete,
   onExpand,
+  canEdit = true,
 }) {
   const [deleting, setDeleting] = useState(false)
 
@@ -134,7 +135,7 @@ export default function SectionSelectPanel({
           {ld || <span className="readonly-placeholder">—</span>}
         </div>
       </label>
-      {selectedSectionId && (
+      {selectedSectionId && canEdit && (
         <button type="button" className="delete-road-link" onClick={handleDeleteClick} disabled={deleting}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />

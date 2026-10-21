@@ -72,7 +72,10 @@ function buildUploadToast(res) {
   }
 }
 
-const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, roads, uploadMeta, onExpand }, ref) {
+const UploadPanel = forwardRef(function UploadPanel(
+  { onUploaded, onRestored, roads, uploadMeta, onExpand, canEdit = true },
+  ref
+) {
   const fileInputRef = useRef(null)
   const restoreInputRef = useRef(null)
   const [fileName, setFileName] = useState('')
@@ -331,7 +334,8 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
       <button
         className="btn-primary btn-block"
         onClick={() => fileInputRef.current?.click()}
-        disabled={uploading || !!pendingConflict}
+        disabled={uploading || !!pendingConflict || !canEdit}
+        title={canEdit ? undefined : 'View-only access'}
       >
         {uploading ? (
           <>
@@ -392,7 +396,13 @@ const UploadPanel = forwardRef(function UploadPanel({ onUploaded, onRestored, ro
           </svg>
           {backingUp ? 'Backing up…' : 'Backup data'}
         </button>
-        <button type="button" className="btn-compact" onClick={() => restoreInputRef.current?.click()}>
+        <button
+          type="button"
+          className="btn-compact"
+          onClick={() => restoreInputRef.current?.click()}
+          disabled={!canEdit}
+          title={canEdit ? undefined : 'View-only access'}
+        >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M12 4v12m0-12-4 4m4-4 4 4M4 18v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
           </svg>

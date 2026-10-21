@@ -97,6 +97,24 @@ function parseEditFileName(fileName) {
   return { roadId: m[1], start: m[2], end: m[3] }
 }
 
+// "share" entries encode what happened directly in file_name as a plain
+// sentence ("Shared with X as Viewer" / "Changed X's role to Editor" /
+// "Removed X's access") -- same codebase convention EDIT_FILE_RE/
+// BACKUP_FILE_PREFIX already use elsewhere in this file (a readable
+// sentence server-side, parsed back out here for display decisions) rather
+// than a separate structured detail shape just for this one kind.
+function shareBadgeLabel(entry) {
+  if (entry.file_name?.startsWith('Shared with')) return 'Shared'
+  if (entry.file_name?.startsWith('Changed ')) return 'Role changed'
+  if (entry.file_name?.startsWith('Removed ')) return 'Access removed'
+  return 'Sharing'
+}
+function shareBadgeClass(entry) {
+  if (entry.file_name?.startsWith('Removed ')) return 'rejected'
+  if (entry.file_name?.startsWith('Changed ')) return 'edited'
+  return 'restored'
+}
+
 function sourceLabelShort(entry) {
   if (entry.kind === 'edit') {
     const roadId = entry.details[0]?.section_id || parseEditFileName(entry.file_name)?.roadId || ''
@@ -561,6 +579,10 @@ export default function UploadHistoryModal({ onClose, triggerRef, initialExpande
                               <span className="upload-summary-badge upload-summary-badge-rejected">Deleted</span>
                             ) : entry.kind === 'restore' ? (
                               <span className="upload-summary-badge upload-summary-badge-restored">Restored</span>
+                            ) : entry.kind === 'share' ? (
+                              <span className={`upload-summary-badge upload-summary-badge-${shareBadgeClass(entry)}`}>
+                                {shareBadgeLabel(entry)}
+                              </span>
                             ) : (
                               summaryBadges(entry).map((b) => (
                                 <span key={b.key} className={`upload-summary-badge upload-summary-badge-${ACTION_BADGE_CLASS[b.key]}`}>
@@ -644,7 +666,7 @@ export default function UploadHistoryModal({ onClose, triggerRef, initialExpande
                               ) : (
                                 <>
                                   <p className="history-expand-source">{sourceLabelFull(entry)}</p>
-                                  {entry.details.length === 0 && !entry.error_message && (
+                                  {entry.details.length === 0 && !entry.error_message && entry.kind !== 'share' && (
                                     <p className="history-no-detail">No road changes recorded for this entry.</p>
                                   )}
                                   {entry.details.map((d, i) => (

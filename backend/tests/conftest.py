@@ -66,7 +66,15 @@ FIXTURE_XLSX = Path(__file__).resolve().parent / "fixtures" / "dpwh_sample.xlsx"
 
 @pytest.fixture()
 def client():
-    with TestClient(app) as c:
+    # base_url's host matters: app/auth.py and app/scope.py mark cookies
+    # Secure whenever request.url.hostname isn't "localhost"/"127.0.0.1"
+    # (matching real local-dev-over-http vs. real-deployment-over-https).
+    # TestClient's default host is "testserver", which isn't either -- a
+    # Secure cookie issued against that host is silently dropped by httpx's
+    # jar on the next plain-http request in-process, which looks exactly
+    # like "sign-in succeeded but the session didn't stick" if not pinned
+    # here.
+    with TestClient(app, base_url="http://127.0.0.1") as c:
         yield c
 
 
@@ -156,3 +164,31 @@ def upload_fixture_as(client, as_user):
             return commit_res.json()
 
     return _upload
+
+
+@pytest.fixture()
+def shared_scope():
+    """shared_scope(owner_scope, actor_scope, role) builds the Scope a
+    sharing-aware request from `actor` would get once get_scope resolves
+    their active_workspace cookie against a real WorkspaceShare grant on
+    `owner`'s workspace -- lets role-enforcement tests (viewer/editor
+    permission checks) skip the cookie/share-lookup machinery and go
+    straight to exercising require_editor/require_owner against the exact
+    Scope shape get_scope would have produced."""
+
+    def _build(owner_scope: Scope, actor_scope: Scope, role: str) -> Scope:
+        return Scope(
+            owner_type="user",
+            owner_id=owner_scope.owner_id,
+            is_guest=False,
+            user_id=actor_scope.user_id,
+            user_name=actor_scope.user_name,
+            user_email=actor_scope.user_email,
+            user_avatar_url=actor_scope.user_avatar_url,
+            role=role,
+            workspace_owner_user_id=int(owner_scope.owner_id),
+            workspace_owner_name=owner_scope.user_name,
+            workspace_owner_email=owner_scope.user_email,
+        )
+
+    return _build

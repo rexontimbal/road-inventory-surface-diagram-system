@@ -21,7 +21,7 @@ from app.schemas import (
     RoadPreviewDuplicate,
     RoadPreviewNew,
 )
-from app.scope import Scope, apply_scope, get_scope, owner_kwargs, user_kwargs
+from app.scope import Scope, apply_scope, get_scope, owner_kwargs, require_editor, user_kwargs
 from app.upload_log import entry_to_out, write_log_entry
 
 router = APIRouter(prefix="/api/backup", tags=["backup"])
@@ -97,6 +97,7 @@ def export_backup(db: Session = Depends(get_db), scope: Scope = Depends(get_scop
 
 @router.post("/restore/preview", response_model=RestorePreview)
 def restore_preview(body: RestorePreviewIn, db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
+    require_editor(scope)
     backup = body.backup
     if backup.app_name != APP_NAME:
         raise HTTPException(status_code=400, detail="This file is not a Road Inventory & Surface Diagram backup.")
@@ -157,6 +158,7 @@ def restore_preview(body: RestorePreviewIn, db: Session = Depends(get_db), scope
 
 @router.post("/restore/commit", response_model=RestoreResult)
 def restore_commit(body: RestoreCommitIn, db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
+    require_editor(scope)
     _prune_pending_restores()
     entry = _PENDING_RESTORES.pop(body.token, None)
     if entry is None:

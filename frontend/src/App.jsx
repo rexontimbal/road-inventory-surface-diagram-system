@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Header, { openHowToUse } from './components/Header'
 import GuestNotice from './components/GuestNotice'
+import WorkspaceBanner from './components/WorkspaceBanner'
+import ShareModal from './components/auth/ShareModal'
 import UploadPanel from './components/sidebar/UploadPanel'
 import SectionSelectPanel from './components/sidebar/SectionSelectPanel'
 import DiagramSettingsPanel from './components/sidebar/DiagramSettingsPanel'
@@ -19,6 +21,8 @@ import { parseDpwhStation } from './utils/chainage'
 import { readUploadMeta, writeUploadMeta } from './utils/uploadMeta'
 import { fetchMe, signInWithGoogle, signOut } from './api/auth'
 import { fetchGuestStatus } from './api/guest'
+import { fetchWorkspaceContext, switchWorkspace } from './api/workspace'
+import { readActiveWorkspaceOwnerId, writeActiveWorkspaceOwnerId } from './utils/activeWorkspace'
 import { showToast } from './components/common/DialogProvider'
 import './App.css'
 
@@ -83,15 +87,41 @@ export default function App() {
   // before the /api/auth/me check resolves.
   const [authUser, setAuthUser] = useState(null)
   const [authChecked, setAuthChecked] = useState(false)
+  // Which workspace is active -- own data, or (if shared with this account)
+  // someone else's -- per /api/workspace/context. null while signed out or
+  // not yet loaded; the header/switcher/banner all treat that as "own".
+  const [workspaceContext, setWorkspaceContext] = useState(null)
+  const [shareModalOpen, setShareModalOpen] = useState(false)
   const uploadPanelRef = useRef(null)
   const diagramPanelRef = useRef(null)
   const headerRef = useRef(null)
 
+  async function refreshWorkspaceContext() {
+    const context = await fetchWorkspaceContext().catch(() => null)
+    setWorkspaceContext(context)
+    writeActiveWorkspaceOwnerId(context?.mode === 'shared' ? context.owner_user_id : null)
+    return context
+  }
+
   useEffect(() => {
     fetchMe()
-      .then((res) => setAuthUser(res.user))
+      .then(async (res) => {
+        setAuthUser(res.user)
+        if (!res.user) return
+        // The active_workspace cookie (if any) already survives a reload on
+        // its own -- this localStorage value only matters as a courtesy
+        // re-confirmation, converting "assume the cookie is still valid"
+        // into "ask the backend to confirm it, and fall back to My data if
+        // that access was removed while this browser was closed."
+        const savedOwnerId = readActiveWorkspaceOwnerId()
+        if (savedOwnerId != null) {
+          await switchWorkspace(savedOwnerId).catch(() => writeActiveWorkspaceOwnerId(null))
+        }
+        await refreshWorkspaceContext()
+      })
       .catch(() => setAuthUser(null))
       .finally(() => setAuthChecked(true))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Signing in/out switches which workspace's data the backend returns for
@@ -139,6 +169,11 @@ export default function App() {
         message: "Your guest data wasn't moved. Use Backup data before signing in to keep it.",
       })
     }
+    // A fresh sign-in via the button (as opposed to the on-mount restore
+    // above) never carries over a previous account's workspace choice --
+    // whatever active_workspace cookie happens to exist is this account's
+    // own history, fetched fresh rather than assumed.
+    await refreshWorkspaceContext()
     await refreshAfterScopeChange()
   }
 
@@ -150,10 +185,29 @@ export default function App() {
     try {
       await signOut()
       setAuthUser(null)
+      setWorkspaceContext(null)
+      // Tied to the account that just signed out -- carrying it over to
+      // whichever account signs in next in this same browser would put
+      // them straight into a workspace that was never shared with THEM.
+      writeActiveWorkspaceOwnerId(null)
       showToast({ variant: 'info', message: 'Signed out' })
       await refreshAfterScopeChange()
     } catch (err) {
       showToast({ variant: 'danger', message: `Sign-out failed: ${err.message}` })
+    }
+  }
+
+  async function handleSwitchWorkspace(ownerUserId) {
+    try {
+      await switchWorkspace(ownerUserId)
+      const context = await refreshWorkspaceContext()
+      await refreshAfterScopeChange()
+      showToast({
+        variant: 'info',
+        message: context?.mode === 'shared' ? `Viewing ${context.owner_name}'s data` : 'Viewing your own data',
+      })
+    } catch (err) {
+      showToast({ variant: 'danger', message: `Could not switch workspace: ${err.message}` })
     }
   }
 
@@ -454,6 +508,11 @@ export default function App() {
     () => (selectedDistrict ? roads.filter((r) => (r.deo || '') === selectedDistrict) : []),
     [roads, selectedDistrict]
   )
+  // Pure UI affordance (disable/hide + a "View-only access" tooltip) -- the
+  // real enforcement is server-side (require_editor/require_owner on every
+  // write route), so defaulting to true before context loads or for a
+  // guest is safe either way.
+  const canEdit = !workspaceContext || workspaceContext.mode === 'own' || workspaceContext.role === 'editor'
 
   return (
     <div className="app-shell">
@@ -467,11 +526,15 @@ export default function App() {
         onGoogleCredential={handleGoogleCredential}
         onSignOut={handleSignOut}
         onOpenHistory={handleOpenHistoryFromHeader}
+        workspaceContext={workspaceContext}
+        onSwitchWorkspace={handleSwitchWorkspace}
+        onOpenShare={() => setShareModalOpen(true)}
       />
       <GuestNotice
         isGuest={authChecked && !authUser}
         onSignInClick={() => headerRef.current?.openSignIn()}
       />
+      <WorkspaceBanner context={workspaceContext} onBackToMine={() => handleSwitchWorkspace(null)} />
       <div className="main-layout">
         <aside className={`sidebar${sidebarCollapsed ? ' collapsed' : ''}`}>
           <button
@@ -496,6 +559,7 @@ export default function App() {
             uploadMeta={uploadMeta}
             collapsed={sidebarCollapsed}
             onExpand={() => setSidebarCollapsed(false)}
+            canEdit={canEdit}
           />
           <SectionSelectPanel
             districts={districts}
@@ -511,6 +575,7 @@ export default function App() {
             onDelete={handleDeleteRoad}
             collapsed={sidebarCollapsed}
             onExpand={() => setSidebarCollapsed(false)}
+            canEdit={canEdit}
           />
           <DiagramSettingsPanel
             road={roadDetail}
@@ -538,6 +603,7 @@ export default function App() {
             sort={tableSort}
             onSortChange={handleSortChange}
             onSegmentEdited={handleSegmentEdited}
+            canEdit={canEdit}
           />
           <DiagramPanel
             ref={diagramPanelRef}
@@ -557,6 +623,13 @@ export default function App() {
             setNetworkBreakdownOpen(false)
             handleSelectSection(sectionId)
           }}
+        />
+      )}
+      {shareModalOpen && (
+        <ShareModal
+          ownerName={authUser?.name}
+          ownerEmail={authUser?.email}
+          onClose={() => setShareModalOpen(false)}
         />
       )}
     </div>

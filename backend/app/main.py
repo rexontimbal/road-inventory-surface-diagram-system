@@ -1,16 +1,17 @@
 import asyncio
 import contextlib
+import logging
 import os
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from starlette.responses import FileResponse
+from starlette.responses import FileResponse, JSONResponse
 
 from app import config  # noqa: F401 -- loads backend/.env before the os.environ reads below (this app, db, auth)
 from app.db import IS_SQLITE, Base, SessionLocal, engine, ensure_schema
-from app.routers import auth, backup, guest, roads
+from app.routers import auth, backup, guest, roads, workspace
 from app.scope import GUEST_CLEANUP_INTERVAL_MINUTES, cleanup_expired_guests
 
 Base.metadata.create_all(bind=engine)
@@ -74,6 +75,24 @@ app.include_router(roads.router)
 app.include_router(backup.router)
 app.include_router(auth.router)
 app.include_router(guest.router)
+app.include_router(workspace.router)
+
+_logger = logging.getLogger("app")
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """FastAPI's own default for an exception that escapes a route handler
+    (anything that isn't an HTTPException, which it already turns into a
+    proper JSON response on its own) is a bare "Internal Server Error" text
+    body -- unhelpful to the user and, worse, a dead end for debugging since
+    nothing about the failure is written anywhere. This logs the full
+    traceback server-side (exc_info=exc, so it prints the real stack, not
+    just the exception's str()) and returns one generic, friendly message
+    instead -- the real detail belongs in the server log, not the response
+    body, so a bug's internals are never exposed to whoever hit it."""
+    _logger.error("Unhandled exception on %s %s", request.method, request.url.path, exc_info=exc)
+    return JSONResponse(status_code=500, content={"detail": "Something went wrong on our end. Please try again."})
 
 
 @app.get("/api/health")

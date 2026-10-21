@@ -3,6 +3,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     Float,
+    ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
@@ -182,3 +183,42 @@ class GuestSession(Base):
     guest_id = Column(String, primary_key=True)
     created_at = Column(String, nullable=False)
     last_activity_at = Column(String, nullable=False)
+
+
+class WorkspaceShare(Base):
+    """Grants one other Google account Viewer/Editor access to a workspace
+    owner's data (Google-Sheets-style sharing) -- the owner themselves needs
+    no row here, they always have full access to their own owner_id.
+
+    user_id starts NULL when the owner shares with an email that hasn't
+    signed in yet (a "pending invite"): the row still exists and already
+    carries the role, it just can't be matched to anyone's session until
+    that email actually signs in, at which point app/routers/auth.py
+    resolves every pending row for that email to the new user_id. Kept
+    NULL rather than deleting-and-recreating the row on activation so the
+    original invited_email/role/created_at survive unchanged.
+
+    invited_email is stored lowercased (see app/scope.py's
+    normalize_email) so matching a freshly-signed-in Google account's email
+    is a plain equality check, not a per-query LOWER() call."""
+
+    __tablename__ = "workspace_shares"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    invited_email = Column(String, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    role = Column(String, nullable=False)  # "viewer" | "editor"
+    invited_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(String, nullable=False)
+    updated_at = Column(String, nullable=False)
+
+    __table_args__ = (
+        # One share row per (owner, invited email) -- re-sharing with the
+        # same email updates this row's role instead of creating a second,
+        # conflicting grant.
+        UniqueConstraint("owner_user_id", "invited_email", name="uq_workspace_share_owner_email"),
+        CheckConstraint("role IN ('viewer', 'editor')", name="ck_workspace_share_role"),
+        Index("idx_workspace_shares_user_id", "user_id"),
+        Index("idx_workspace_shares_owner", "owner_user_id"),
+    )

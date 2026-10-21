@@ -12,7 +12,7 @@ function initials(name) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 }
 
-export default function UserMenu({ user, onSignOut, onOpenHistory }) {
+export default function UserMenu({ user, onSignOut, onOpenHistory, workspaceContext, onSwitchWorkspace }) {
   const [open, setOpen] = useState(false)
   const [ready, setReady] = useState(false)
   const [avatarFailed, setAvatarFailed] = useState(false)
@@ -111,6 +111,45 @@ export default function UserMenu({ user, onSignOut, onOpenHistory }) {
               <div className="user-menu-identity-name">{user.name}</div>
               <div className="user-menu-identity-email">{user.email}</div>
             </div>
+            <div className="user-menu-divider" />
+            <div className="user-menu-section-label">Workspace</div>
+            <button
+              type="button"
+              className="user-menu-item user-menu-workspace-item"
+              role="menuitemradio"
+              aria-checked={workspaceContext?.mode === 'own'}
+              onClick={() => {
+                close()
+                onSwitchWorkspace?.(null)
+              }}
+            >
+              <span className="user-menu-workspace-check" aria-hidden="true">
+                {workspaceContext?.mode === 'own' ? '✓' : ''}
+              </span>
+              My data
+            </button>
+            {workspaceContext?.shared_with_me?.map((w) => (
+              <button
+                type="button"
+                key={w.owner_user_id}
+                className="user-menu-item user-menu-workspace-item"
+                role="menuitemradio"
+                aria-checked={workspaceContext?.mode === 'shared' && workspaceContext?.owner_user_id === w.owner_user_id}
+                title={`${w.owner_name}'s data · ${w.role === 'editor' ? 'Editor' : 'Viewer'}`}
+                onClick={() => {
+                  close()
+                  onSwitchWorkspace?.(w.owner_user_id)
+                }}
+              >
+                <span className="user-menu-workspace-check" aria-hidden="true">
+                  {workspaceContext?.mode === 'shared' && workspaceContext?.owner_user_id === w.owner_user_id ? '✓' : ''}
+                </span>
+                <span className="user-menu-workspace-label">
+                  {w.owner_name}&rsquo;s data
+                  <span className="user-menu-workspace-role"> · {w.role === 'editor' ? 'Editor' : 'Viewer'}</span>
+                </span>
+              </button>
+            ))}
             <div className="user-menu-divider" />
             <button
               type="button"

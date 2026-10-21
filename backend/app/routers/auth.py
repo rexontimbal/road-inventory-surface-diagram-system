@@ -11,8 +11,9 @@ from app.auth import (
     verify_google_id_token,
 )
 from app.db import get_db
-from app.models import User
+from app.models import User, WorkspaceShare
 from app.schemas import GoogleAuthIn, MeOut, UserOut
+from app.scope import normalize_email
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -52,6 +53,16 @@ def auth_google(body: GoogleAuthIn, request: Request, response: Response, db: Se
         user.last_login_at = now
     db.commit()
     db.refresh(user)
+
+    # Activates every pending invite (shared with this email before the
+    # invitee had ever signed in) -- matched case-insensitively since the
+    # person who shared can't be expected to type the exact case Google
+    # happens to store this account's email in. A share already activated
+    # (user_id set) or belonging to a different email is untouched.
+    db.query(WorkspaceShare).filter(
+        WorkspaceShare.invited_email == normalize_email(email), WorkspaceShare.user_id.is_(None)
+    ).update({"user_id": user.id}, synchronize_session=False)
+    db.commit()
 
     token = create_session_token(user.id)
     response.set_cookie(SESSION_COOKIE_NAME, token, **cookie_kwargs(request))
