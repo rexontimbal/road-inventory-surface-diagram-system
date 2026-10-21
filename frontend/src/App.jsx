@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Header, { openHowToUse } from './components/Header'
 import GuestNotice from './components/GuestNotice'
-import GuestMergeModal from './components/auth/GuestMergeModal'
 import UploadPanel from './components/sidebar/UploadPanel'
 import SectionSelectPanel from './components/sidebar/SectionSelectPanel'
 import DiagramSettingsPanel from './components/sidebar/DiagramSettingsPanel'
@@ -84,7 +83,6 @@ export default function App() {
   // before the /api/auth/me check resolves.
   const [authUser, setAuthUser] = useState(null)
   const [authChecked, setAuthChecked] = useState(false)
-  const [guestMergeOpen, setGuestMergeOpen] = useState(false)
   const uploadPanelRef = useRef(null)
   const diagramPanelRef = useRef(null)
   const headerRef = useRef(null)
@@ -96,10 +94,10 @@ export default function App() {
       .finally(() => setAuthChecked(true))
   }, [])
 
-  // Signing in/out (or resolving a guest merge) switches which scope's data
-  // the backend returns for every read -- the road list, table, diagram
-  // selection, and network summary already on screen are for the OLD scope
-  // and must be dropped, not just left stale underneath the new state.
+  // Signing in/out switches which workspace's data the backend returns for
+  // every read -- the road list, table, diagram selection, and network
+  // summary already on screen are for the OLD scope and must be dropped,
+  // not just left stale underneath the new state.
   async function refreshAfterScopeChange() {
     setSelectedDistrict('')
     setSelectedSectionId('')
@@ -107,6 +105,12 @@ export default function App() {
     setGeneratedRange(null)
     setHasGenerated(false)
     setTablePage(1)
+    // "Last upload: <file>, <time>" is browser-local (localStorage), not
+    // tied to any account -- without clearing it here, switching accounts
+    // (or signing out) in the same browser would keep showing the PREVIOUS
+    // workspace's last-uploaded file next to the new, unrelated workspace.
+    setUploadMeta(null)
+    writeUploadMeta(null)
     await Promise.all([
       refreshRoads(),
       refreshSegmentsPage(1, tableFilters, tableSort),
@@ -124,19 +128,17 @@ export default function App() {
     const res = await signInWithGoogle(idToken)
     setAuthUser(res.user)
     showToast({ variant: 'success', message: `Signed in as ${res.user.name}` })
+    // Guest data is never moved into an account -- it just stays in the
+    // guest sandbox and expires on its own TTL (GuestNotice already shows
+    // the countdown). This toast is the only acknowledgment that it existed
+    // and wasn't carried over, in case the user expected otherwise.
     const guestStatus = await fetchGuestStatus().catch(() => null)
     if (guestStatus?.has_data) {
-      setGuestMergeOpen(true)
-    } else {
-      await refreshAfterScopeChange()
+      showToast({
+        variant: 'info',
+        message: "Your guest data wasn't moved. Use Backup data before signing in to keep it.",
+      })
     }
-  }
-
-  // GuestMergeModal itself already shows its own success/failure toast for
-  // the move/discard action -- this just refreshes the now-current scope's
-  // data once the modal is done, whichever way the user resolved it.
-  async function handleGuestMergeDone() {
-    setGuestMergeOpen(false)
     await refreshAfterScopeChange()
   }
 
@@ -470,7 +472,6 @@ export default function App() {
         isGuest={authChecked && !authUser}
         onSignInClick={() => headerRef.current?.openSignIn()}
       />
-      {guestMergeOpen && <GuestMergeModal onDone={handleGuestMergeDone} />}
       <div className="main-layout">
         <aside className={`sidebar${sidebarCollapsed ? ' collapsed' : ''}`}>
           <button

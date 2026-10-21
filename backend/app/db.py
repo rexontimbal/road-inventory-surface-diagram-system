@@ -1,6 +1,6 @@
 import os
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app import config  # noqa: F401 -- loads backend/.env before the os.environ read below
@@ -300,6 +300,101 @@ def _ensure_schema_postgres():
         conn.commit()
 
 
+def _migrate_legacy_workspace_data(conn):
+    """One-time reassignment of pre-accounts shared data (owner_type=
+    'workspace', from when every signed-in user saw the same pool) into a
+    real per-user workspace -- gated entirely by LEGACY_DATA_OWNER_EMAIL, so
+    this is a silent no-op on every deploy that hasn't set it. Uses
+    conn.execute(text(...), params) rather than exec_driver_sql here (unlike
+    the rest of this file) specifically so the same parameterized SQL works
+    unchanged on both SQLite (qmark) and psycopg (%s) without a dialect
+    branch -- the email comes from an env var, not request input, but
+    there's no reason to hand-interpolate it into the query either.
+
+    Idempotent and safe to leave in place permanently: the UPDATEs only
+    touch owner_type='workspace' rows, and after the first successful run
+    there are none left, so every later startup's COUNT(*) check is 0 and
+    returns immediately. Matches the target email case-insensitively since
+    Google account emails aren't stored lowercased.
+
+    road_segments' (section_id, owner_type, owner_id) foreign key to roads
+    has no ON UPDATE CASCADE, so an UPDATE that reassigns the PARENT row's
+    key columns is rejected immediately by both engines while a child row
+    still points at the old (section_id, 'workspace', '') combination --
+    confirmed by actually running this against real data, not just reasoned
+    through. The constraint is dropped for the duration of this one
+    multi-table update and recreated identically after, same technique this
+    file already uses for CHECK constraints that can't be altered in place.
+    Caller must NOT already have an open transaction on `conn` when this
+    runs: SQLite's PRAGMA foreign_keys is a no-op inside one ("may only be
+    enabled or disabled when there is no pending BEGIN"), which would
+    silently leave the constraint enforced and this would still fail."""
+    target_email = (os.environ.get("LEGACY_DATA_OWNER_EMAIL") or "").strip()
+    if not target_email:
+        return
+
+    row = conn.execute(
+        text("SELECT id FROM users WHERE LOWER(email) = LOWER(:email)"), {"email": target_email}
+    ).fetchone()
+    if row is None:
+        print(
+            f"LEGACY_DATA_OWNER_EMAIL={target_email!r} is set but no matching user has signed "
+            "in yet -- legacy workspace data stays untouched until they do."
+        )
+        return
+    owner_id = str(row[0])
+
+    road_count = conn.execute(text("SELECT COUNT(*) FROM roads WHERE owner_type = 'workspace'")).scalar()
+    if not road_count:
+        return  # already migrated (or there was never any shared data)
+
+    seg_count = conn.execute(text("SELECT COUNT(*) FROM road_segments WHERE owner_type = 'workspace'")).scalar()
+    log_count = conn.execute(text("SELECT COUNT(*) FROM upload_log WHERE owner_type = 'workspace'")).scalar()
+
+    if IS_SQLITE:
+        # The SELECTs above already auto-began their own transaction (any
+        # execute() does, on a fresh or just-committed connection) -- close
+        # it out immediately before this PRAGMA, which is a silent no-op
+        # while one is open.
+        conn.commit()
+        conn.exec_driver_sql("PRAGMA foreign_keys = OFF")
+    else:
+        for name in _pg_constraint_names(conn, "road_segments", "f"):
+            conn.exec_driver_sql(f'ALTER TABLE road_segments DROP CONSTRAINT "{name}"')
+
+    conn.execute(
+        text("UPDATE roads SET owner_type = 'user', owner_id = :oid WHERE owner_type = 'workspace'"),
+        {"oid": owner_id},
+    )
+    conn.execute(
+        text("UPDATE road_segments SET owner_type = 'user', owner_id = :oid WHERE owner_type = 'workspace'"),
+        {"oid": owner_id},
+    )
+    conn.execute(
+        text("UPDATE upload_log SET owner_type = 'user', owner_id = :oid WHERE owner_type = 'workspace'"),
+        {"oid": owner_id},
+    )
+
+    if IS_SQLITE:
+        # Takes effect immediately even mid-transaction when turning ON
+        # (unlike OFF, which needs no pending BEGIN) -- but commit anyway so
+        # a crash before the next statement can't leave it off for the rest
+        # of this connection's lifetime in the pool.
+        conn.exec_driver_sql("PRAGMA foreign_keys = ON")
+        conn.commit()
+    else:
+        conn.exec_driver_sql(
+            "ALTER TABLE road_segments ADD CONSTRAINT road_segments_section_id_fkey "
+            "FOREIGN KEY (section_id, owner_type, owner_id) REFERENCES roads (section_id, owner_type, owner_id) "
+            "ON DELETE CASCADE"
+        )
+
+    print(
+        f"Legacy data migration: moved {road_count} section(s), {seg_count} segment(s), "
+        f"{log_count} upload-log entr{'y' if log_count == 1 else 'ies'} to {target_email} (user id {row[0]})"
+    )
+
+
 def ensure_schema():
     """Base.metadata.create_all only creates missing TABLES, not missing
     COLUMNS on a table that already exists -- so a column added to a model
@@ -311,9 +406,14 @@ def ensure_schema():
     scoped roads, then the road_id -> section_id/DPWH rename) up to the
     current model -- SQLite and Postgres just need different DDL to get
     there (SQLite can't ALTER a primary key or a CHECK constraint in place,
-    so those steps rebuild the table; Postgres supports both directly)."""
+    so those steps rebuild the table; Postgres supports both directly). The
+    legacy-workspace-data reassignment at the end runs for both dialects the
+    same way, since it's plain parameterized DML, not DDL."""
     if not IS_SQLITE:
         _ensure_schema_postgres()
+        with engine.connect() as conn:
+            _migrate_legacy_workspace_data(conn)
+            conn.commit()
         return
     with engine.connect() as conn:
         existing_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(roads)").fetchall()}
@@ -348,6 +448,12 @@ def ensure_schema():
             conn.exec_driver_sql("ALTER TABLE upload_log ADD COLUMN actor_email TEXT")
             conn.exec_driver_sql("ALTER TABLE upload_log ADD COLUMN actor_avatar_url TEXT")
 
+        # Commits (and so closes out) the schema-migration transaction above
+        # before the legacy-data migration runs -- it needs to toggle
+        # PRAGMA foreign_keys mid-function, which SQLite silently ignores
+        # while a transaction is still open.
+        conn.commit()
+        _migrate_legacy_workspace_data(conn)
         conn.commit()
 
 

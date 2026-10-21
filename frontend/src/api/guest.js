@@ -19,21 +19,6 @@ export async function fetchGuestStatus() {
   return handleResponse(res)
 }
 
-export async function previewGuestMerge() {
-  const res = await fetch(`${BASE}/merge/preview`, { method: 'POST', credentials: 'include' })
-  return handleResponse(res)
-}
-
-export async function commitGuestMerge(decisions) {
-  const res = await fetch(`${BASE}/merge/commit`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({ decisions }),
-  })
-  return handleResponse(res)
-}
-
 export async function discardGuestData() {
   const res = await fetch(`${BASE}/discard`, { method: 'POST', credentials: 'include' })
   return handleResponse(res)

@@ -21,8 +21,9 @@ GUEST_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 
 @dataclass(frozen=True)
 class Scope:
-    owner_type: str  # "workspace" | "guest"
-    owner_id: str | None  # guest_id for guest scope, always None for workspace
+    owner_type: str  # "user" | "guest" (plus the legacy "workspace", only
+    # ever read from pre-existing rows -- no live request produces it anymore)
+    owner_id: str | None  # guest_id for guest scope, str(user.id) for a signed-in user
     is_guest: bool
     # The signed-in user who made this request, for "who did it" logging
     # (Part 5) -- None for a guest. Name/email/avatar are carried here too
@@ -35,17 +36,18 @@ class Scope:
 
 def get_scope(request: Request, response: Response, db: Session = Depends(get_db)) -> Scope:
     """FastAPI dependency resolving which data a request can see/write:
-    - A signed-in user -> the one shared "workspace" (every signed-in user
-      sees the same data, including everything uploaded before accounts
-      existed).
+    - A signed-in user -> their own private workspace, owner_id = str(user.id).
+      Nothing here grants access to another account's workspace -- that's
+      Phase 2 (sharing), which will look up an explicit grant before letting
+      a request read/write a *different* owner_id than the caller's own.
     - Anyone else -> their own private "guest" sandbox, identified by a
       random cookie, created on first visit and refreshed (last_activity_at)
       on every request so the TTL cleanup job measures idle time correctly."""
     user = get_current_user(request, db)
     if user is not None:
         return Scope(
-            owner_type="workspace",
-            owner_id=None,
+            owner_type="user",
+            owner_id=str(user.id),
             is_guest=False,
             user_id=user.id,
             user_name=user.name,
@@ -80,10 +82,12 @@ def get_scope(request: Request, response: Response, db: Session = Depends(get_db
 
 
 def _db_owner_id(scope: Scope) -> str:
-    """Scope.owner_id is None (at the API/app layer) for the workspace, but
-    the DB column stores '' there instead -- see WORKSPACE_OWNER_ID's
-    docstring in app/models.py for why (NULL can't be used in a
-    uniqueness-enforcing key)."""
+    """No live Scope has owner_id=None anymore (user -> str(user.id), guest ->
+    the guest cookie) -- this translation only matters for reading legacy
+    owner_type='workspace' rows that predate per-user workspaces, where the
+    DB column stores '' instead of NULL (see WORKSPACE_OWNER_ID's docstring
+    in app/models.py for why: NULL can't be used in a uniqueness-enforcing
+    key). Kept as a safety net, not something any current caller triggers."""
     return scope.owner_id if scope.owner_id is not None else WORKSPACE_OWNER_ID
 
 

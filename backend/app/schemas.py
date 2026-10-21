@@ -25,21 +25,6 @@ class GuestStatusOut(BaseModel):
     expires_at: str | None = None
 
 
-class GuestMergePreview(BaseModel):
-    new_roads: list["RoadPreviewNew"]
-    duplicates: list["RoadPreviewDuplicate"]
-
-
-class GuestMergeCommitIn(BaseModel):
-    decisions: dict[str, Literal["replace", "keep"]] = {}
-
-
-class GuestMergeResult(BaseModel):
-    moved: int
-    replaced: int
-    kept: int
-
-
 class RoadSummary(BaseModel):
     section_id: str
     road_name: str
