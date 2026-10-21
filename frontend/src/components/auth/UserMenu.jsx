@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { getFullscreenPortalRoot } from '../../utils/fullscreenPortal'
 
-const PANEL_WIDTH = 220
+const PANEL_WIDTH = 240
 const GAP = 8
 
 function initials(name) {
@@ -12,17 +12,37 @@ function initials(name) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 }
 
-export default function UserMenu({ user, onSignOut, onOpenHistory, workspaceContext, onSwitchWorkspace }) {
+export default function UserMenu({
+  user,
+  onSignOut,
+  onOpenHistory,
+  workspaceContext,
+  onSwitchWorkspace,
+  notifications,
+  onDropdownClose,
+}) {
   const [open, setOpen] = useState(false)
   const [ready, setReady] = useState(false)
   const [avatarFailed, setAvatarFailed] = useState(false)
   const [placement, setPlacement] = useState(null) // { top, left }
   const triggerRef = useRef(null)
   const panelRef = useRef(null)
+  // Snapshot taken the moment the dropdown opens -- the "New" pill / "Role
+  // changed" line must keep showing for the rest of this open/close cycle
+  // even though opening it is what triggers marking everything seen
+  // server-side (badge clears right away, but the pill itself "stays until
+  // the dropdown closes" per spec).
+  const openSnapshotRef = useRef(new Map())
+
+  function open_() {
+    openSnapshotRef.current = new Map((notifications?.items || []).map((i) => [i.owner_user_id, i]))
+    setOpen(true)
+  }
 
   function close() {
     setOpen(false)
     setReady(false)
+    onDropdownClose?.()
   }
 
   // Portal-rendered (not a CSS-absolute child of the trigger) so the panel
@@ -70,6 +90,9 @@ export default function UserMenu({ user, onSignOut, onOpenHistory, workspaceCont
   }, [open])
 
   const showImage = user.avatar_url && !avatarFailed
+  const newCount = notifications?.new_count || 0
+  const badgeLabel = newCount > 9 ? '9+' : String(newCount)
+  const badgeTooltip = `${newCount} new shared workspace${newCount === 1 ? '' : 's'}`
 
   return (
     <div className="user-menu">
@@ -77,24 +100,37 @@ export default function UserMenu({ user, onSignOut, onOpenHistory, workspaceCont
         type="button"
         ref={triggerRef}
         className="user-menu-trigger"
-        onClick={() => (open ? close() : setOpen(true))}
+        onClick={() => (open ? close() : open_())}
         aria-haspopup="true"
         aria-expanded={open}
         title={user.name}
       >
-        {showImage ? (
-          <img
-            src={user.avatar_url}
-            alt=""
-            className="user-menu-avatar"
-            onError={() => setAvatarFailed(true)}
-            referrerPolicy="no-referrer"
-          />
-        ) : (
-          <span className="user-menu-avatar user-menu-avatar-initials" aria-hidden="true">
-            {initials(user.name)}
-          </span>
-        )}
+        <span className="user-menu-avatar-wrap">
+          {showImage ? (
+            <img
+              src={user.avatar_url}
+              alt=""
+              className="user-menu-avatar"
+              onError={() => setAvatarFailed(true)}
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <span className="user-menu-avatar user-menu-avatar-initials" aria-hidden="true">
+              {initials(user.name)}
+            </span>
+          )}
+          {newCount > 0 && (
+            <span
+              key={notifications?.pulseKey ?? 0}
+              className="user-menu-badge"
+              role="status"
+              title={badgeTooltip}
+              aria-label={badgeTooltip}
+            >
+              {badgeLabel}
+            </span>
+          )}
+        </span>
         <span className="user-menu-name">{user.name.split(' ')[0]}</span>
       </button>
 
@@ -128,28 +164,43 @@ export default function UserMenu({ user, onSignOut, onOpenHistory, workspaceCont
               </span>
               My data
             </button>
-            {workspaceContext?.shared_with_me?.map((w) => (
-              <button
-                type="button"
-                key={w.owner_user_id}
-                className="user-menu-item user-menu-workspace-item"
-                role="menuitemradio"
-                aria-checked={workspaceContext?.mode === 'shared' && workspaceContext?.owner_user_id === w.owner_user_id}
-                title={`${w.owner_name}'s data · ${w.role === 'editor' ? 'Editor' : 'Viewer'}`}
-                onClick={() => {
-                  close()
-                  onSwitchWorkspace?.(w.owner_user_id)
-                }}
-              >
-                <span className="user-menu-workspace-check" aria-hidden="true">
-                  {workspaceContext?.mode === 'shared' && workspaceContext?.owner_user_id === w.owner_user_id ? '✓' : ''}
-                </span>
-                <span className="user-menu-workspace-label">
-                  {w.owner_name}&rsquo;s data
-                  <span className="user-menu-workspace-role"> · {w.role === 'editor' ? 'Editor' : 'Viewer'}</span>
-                </span>
-              </button>
-            ))}
+            {workspaceContext?.shared_with_me?.map((w) => {
+              const snapshot = openSnapshotRef.current.get(w.owner_user_id)
+              const isNew = snapshot?.is_new && snapshot.last_change === 'shared'
+              const roleChanged = snapshot?.is_new && snapshot.last_change === 'role_changed'
+              return (
+                <button
+                  type="button"
+                  key={w.owner_user_id}
+                  className="user-menu-item user-menu-workspace-item"
+                  role="menuitemradio"
+                  aria-checked={workspaceContext?.mode === 'shared' && workspaceContext?.owner_user_id === w.owner_user_id}
+                  title={`${w.owner_name}'s data · ${w.role === 'editor' ? 'Editor' : 'Viewer'}`}
+                  onClick={() => {
+                    close()
+                    onSwitchWorkspace?.(w.owner_user_id)
+                  }}
+                >
+                  <span className="user-menu-workspace-check" aria-hidden="true">
+                    {workspaceContext?.mode === 'shared' && workspaceContext?.owner_user_id === w.owner_user_id ? '✓' : ''}
+                  </span>
+                  <span className="user-menu-workspace-text">
+                    <span className="user-menu-workspace-row">
+                      <span className="user-menu-workspace-label">
+                        {w.owner_name}&rsquo;s data
+                        <span className="user-menu-workspace-role"> · {w.role === 'editor' ? 'Editor' : 'Viewer'}</span>
+                      </span>
+                      {isNew && <span className="user-menu-new-pill">New</span>}
+                    </span>
+                    {roleChanged && (
+                      <span className="user-menu-role-changed">
+                        Role changed to {w.role === 'editor' ? 'Editor' : 'Viewer'}
+                      </span>
+                    )}
+                  </span>
+                </button>
+              )
+            })}
             <div className="user-menu-divider" />
             <button
               type="button"

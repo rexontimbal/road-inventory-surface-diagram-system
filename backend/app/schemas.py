@@ -61,11 +61,17 @@ class WorkspaceSwitchIn(BaseModel):
 
 
 class SharedWorkspaceOut(BaseModel):
+    share_id: int
     owner_user_id: int
     owner_name: str
     owner_email: str
     owner_avatar_url: str | None = None
     role: Literal["viewer", "editor"]
+    # Drives the avatar-dropdown "New" pill / muted role-change line (Part 3)
+    # straight off the same list the switcher already renders, no second
+    # fetch needed just for that.
+    is_new: bool
+    last_change: Literal["shared", "role_changed"] | None = None
 
 
 class WorkspaceContextOut(BaseModel):
@@ -75,6 +81,35 @@ class WorkspaceContextOut(BaseModel):
     owner_name: str | None = None
     owner_email: str | None = None
     shared_with_me: list[SharedWorkspaceOut]
+    # Set (once) when the active_workspace cookie named a workspace that's
+    # no longer actually shared with this account -- the request already
+    # fell back to "my data" silently; this is just what lets the frontend
+    # tell the user why, with one info toast, instead of their view
+    # changing with no explanation. Cleared cookie-side the same request
+    # it's reported in, so it's never reported twice.
+    access_removed_owner_name: str | None = None
+
+
+class ShareNotificationOut(BaseModel):
+    share_id: int
+    owner_user_id: int
+    owner_name: str
+    owner_email: str
+    owner_avatar_url: str | None = None
+    role: Literal["viewer", "editor"]
+    last_change: Literal["shared", "role_changed"] | None = None
+    is_new: bool
+
+
+class NotificationsOut(BaseModel):
+    new_count: int
+    items: list[ShareNotificationOut]
+
+
+class MarkNotificationsSeenIn(BaseModel):
+    # None (or omitted) marks every unseen share seen; a specific id marks
+    # just that one (used when switching into that workspace).
+    share_id: int | None = None
 
 
 class RoadSummary(BaseModel):

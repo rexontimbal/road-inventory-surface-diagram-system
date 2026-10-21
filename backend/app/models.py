@@ -212,6 +212,14 @@ class WorkspaceShare(Base):
     invited_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(String, nullable=False)
     updated_at = Column(String, nullable=False)
+    # NULL = "new"/unseen by the recipient -- set the moment they switch into
+    # this workspace, or explicitly mark the whole notification list seen
+    # (closing the avatar dropdown). Reset to NULL (re-flagged as new) on a
+    # role change, not just on first share -- last_change says which kind of
+    # "new" it is, since the badge/dropdown/toast all read differently for
+    # a brand-new share vs. an existing one's role changing.
+    seen_at = Column(String, nullable=True)
+    last_change = Column(String, nullable=True)  # "shared" | "role_changed" | NULL
 
     __table_args__ = (
         # One share row per (owner, invited email) -- re-sharing with the
@@ -219,6 +227,9 @@ class WorkspaceShare(Base):
         # conflicting grant.
         UniqueConstraint("owner_user_id", "invited_email", name="uq_workspace_share_owner_email"),
         CheckConstraint("role IN ('viewer', 'editor')", name="ck_workspace_share_role"),
+        CheckConstraint(
+            "last_change IS NULL OR last_change IN ('shared', 'role_changed')", name="ck_workspace_share_last_change"
+        ),
         Index("idx_workspace_shares_user_id", "user_id"),
         Index("idx_workspace_shares_owner", "owner_user_id"),
     )

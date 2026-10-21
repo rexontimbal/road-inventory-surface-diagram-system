@@ -297,6 +297,15 @@ def _ensure_schema_postgres():
             conn.exec_driver_sql("ALTER TABLE upload_log ADD COLUMN actor_email TEXT")
             conn.exec_driver_sql("ALTER TABLE upload_log ADD COLUMN actor_avatar_url TEXT")
 
+        # workspace_shares itself is created fresh (with every current
+        # column, these two included) by Base.metadata.create_all whenever
+        # it doesn't exist yet -- this only ever fires on a DB that already
+        # had the table from before share notifications existed.
+        share_cols = _pg_table_columns(conn, "workspace_shares")
+        if "seen_at" not in share_cols:
+            conn.exec_driver_sql("ALTER TABLE workspace_shares ADD COLUMN seen_at TEXT")
+            conn.exec_driver_sql("ALTER TABLE workspace_shares ADD COLUMN last_change TEXT")
+
         conn.commit()
 
 
@@ -447,6 +456,11 @@ def ensure_schema():
             conn.exec_driver_sql("ALTER TABLE upload_log ADD COLUMN actor_name TEXT")
             conn.exec_driver_sql("ALTER TABLE upload_log ADD COLUMN actor_email TEXT")
             conn.exec_driver_sql("ALTER TABLE upload_log ADD COLUMN actor_avatar_url TEXT")
+
+        share_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(workspace_shares)").fetchall()}
+        if "seen_at" not in share_cols:
+            conn.exec_driver_sql("ALTER TABLE workspace_shares ADD COLUMN seen_at TEXT")
+            conn.exec_driver_sql("ALTER TABLE workspace_shares ADD COLUMN last_change TEXT")
 
         # Commits (and so closes out) the schema-migration transaction above
         # before the legacy-data migration runs -- it needs to toggle

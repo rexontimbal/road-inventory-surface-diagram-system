@@ -21,7 +21,7 @@ import { parseDpwhStation } from './utils/chainage'
 import { readUploadMeta, writeUploadMeta } from './utils/uploadMeta'
 import { fetchMe, signInWithGoogle, signOut } from './api/auth'
 import { fetchGuestStatus } from './api/guest'
-import { fetchWorkspaceContext, switchWorkspace } from './api/workspace'
+import { fetchWorkspaceContext, switchWorkspace, fetchNotifications, markNotificationsSeen } from './api/workspace'
 import { readActiveWorkspaceOwnerId, writeActiveWorkspaceOwnerId } from './utils/activeWorkspace'
 import { showToast } from './components/common/DialogProvider'
 import './App.css'
@@ -92,6 +92,16 @@ export default function App() {
   // not yet loaded; the header/switcher/banner all treat that as "own".
   const [workspaceContext, setWorkspaceContext] = useState(null)
   const [shareModalOpen, setShareModalOpen] = useState(false)
+  // Share notifications (badge count + dropdown New/role-changed pills),
+  // per /api/workspace/notifications -- pulseKey increments only when
+  // new_count goes UP, so the badge's one-shot pulse (see UserMenu) replays
+  // exactly on a genuinely new unseen share, not on every poll tick.
+  const [notifications, setNotifications] = useState({ new_count: 0, items: [], pulseKey: 0 })
+  const prevNewCountRef = useRef(0)
+  // Share ids already toasted this session, keyed by `${share_id}:${last_change}`
+  // so a later role change (a DIFFERENT "new" event on the same share) still
+  // gets its own toast, without re-toasting the same unseen share every poll.
+  const notifiedKeysRef = useRef(new Set())
   const uploadPanelRef = useRef(null)
   const diagramPanelRef = useRef(null)
   const headerRef = useRef(null)
@@ -100,7 +110,53 @@ export default function App() {
     const context = await fetchWorkspaceContext().catch(() => null)
     setWorkspaceContext(context)
     writeActiveWorkspaceOwnerId(context?.mode === 'shared' ? context.owner_user_id : null)
+    if (context?.access_removed_owner_name) {
+      showToast({
+        variant: 'info',
+        message: `Your access to ${context.access_removed_owner_name}'s data was removed.`,
+      })
+      await refreshAfterScopeChange()
+    }
     return context
+  }
+
+  async function refreshNotifications({ toastNew = false } = {}) {
+    const data = await fetchNotifications().catch(() => null)
+    if (!data) return null
+    if (toastNew) {
+      for (const item of data.items) {
+        if (!item.is_new) continue
+        const key = `${item.share_id}:${item.last_change}`
+        if (notifiedKeysRef.current.has(key)) continue
+        notifiedKeysRef.current.add(key)
+        const roleLabel = item.role === 'editor' ? 'Editor' : 'Viewer'
+        const message =
+          item.last_change === 'role_changed'
+            ? `${item.owner_name} changed your access to ${roleLabel}`
+            : `${item.owner_name} shared their data with you (${roleLabel})`
+        showToast({
+          variant: 'info',
+          message,
+          duration: 8000,
+          actionLabel: 'Open',
+          onAction: () => handleSwitchWorkspace(item.owner_user_id),
+        })
+      }
+    }
+    const pulse = data.new_count > prevNewCountRef.current
+    prevNewCountRef.current = data.new_count
+    setNotifications((prev) => ({ ...data, pulseKey: pulse ? prev.pulseKey + 1 : prev.pulseKey }))
+    return data
+  }
+
+  // Avatar dropdown opening is what marks everything seen server-side (via
+  // switchWorkspace for a single workspace, or this for "closed the whole
+  // dropdown") -- called on close, not open, since the "New" pill must stay
+  // visible for the whole time the dropdown is open (see UserMenu's
+  // openSnapshotRef).
+  async function handleDropdownClose() {
+    await markNotificationsSeen(null).catch(() => {})
+    await refreshNotifications()
   }
 
   useEffect(() => {
@@ -118,11 +174,37 @@ export default function App() {
           await switchWorkspace(savedOwnerId).catch(() => writeActiveWorkspaceOwnerId(null))
         }
         await refreshWorkspaceContext()
+        await refreshNotifications({ toastNew: true })
       })
       .catch(() => setAuthUser(null))
       .finally(() => setAuthChecked(true))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Live updates (Part 6): poll while the tab is visible, pause while
+  // hidden -- a background tab doesn't need a badge that's accurate to the
+  // second, and skipping the fetch there avoids surprising the user with a
+  // toast for a share they never actually looked away from. Catches back up
+  // immediately on regaining visibility rather than waiting out the rest of
+  // whatever the last 60s interval had left.
+  useEffect(() => {
+    if (!authUser) return
+    function tick() {
+      if (document.hidden) return
+      refreshNotifications({ toastNew: true })
+      refreshWorkspaceContext()
+    }
+    const interval = setInterval(tick, 60000)
+    function handleVisibility() {
+      if (!document.hidden) tick()
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authUser])
 
   // Signing in/out switches which workspace's data the backend returns for
   // every read -- the road list, table, diagram selection, and network
@@ -175,6 +257,7 @@ export default function App() {
     // own history, fetched fresh rather than assumed.
     await refreshWorkspaceContext()
     await refreshAfterScopeChange()
+    await refreshNotifications({ toastNew: true })
   }
 
   function handleOpenHistoryFromHeader() {
@@ -186,6 +269,9 @@ export default function App() {
       await signOut()
       setAuthUser(null)
       setWorkspaceContext(null)
+      setNotifications({ new_count: 0, items: [], pulseKey: 0 })
+      prevNewCountRef.current = 0
+      notifiedKeysRef.current = new Set()
       // Tied to the account that just signed out -- carrying it over to
       // whichever account signs in next in this same browser would put
       // them straight into a workspace that was never shared with THEM.
@@ -202,6 +288,10 @@ export default function App() {
       await switchWorkspace(ownerUserId)
       const context = await refreshWorkspaceContext()
       await refreshAfterScopeChange()
+      // Switching into a shared workspace already marked that one share
+      // seen server-side -- resync the local badge/pill state to match
+      // instead of waiting for the next 60s poll.
+      await refreshNotifications()
       showToast({
         variant: 'info',
         message: context?.mode === 'shared' ? `Viewing ${context.owner_name}'s data` : 'Viewing your own data',
@@ -528,6 +618,8 @@ export default function App() {
         workspaceContext={workspaceContext}
         onSwitchWorkspace={handleSwitchWorkspace}
         onOpenShare={() => setShareModalOpen(true)}
+        notifications={notifications}
+        onDropdownClose={handleDropdownClose}
       />
       <GuestNotice
         isGuest={authChecked && !authUser}

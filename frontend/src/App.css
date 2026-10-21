@@ -337,6 +337,11 @@
   background: rgba(255, 255, 255, 0.14);
   border-color: rgba(255, 255, 255, 0.25);
 }
+.user-menu-avatar-wrap {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
 .user-menu-avatar {
   flex-shrink: 0;
   width: 32px;
@@ -344,6 +349,42 @@
   border-radius: 50%;
   object-fit: cover;
   background: var(--accent);
+}
+/* Absolutely positioned over .user-menu-avatar-wrap (sized to match the
+   avatar exactly) so it overlays the avatar's own top-right corner without
+   taking up layout space -- the trigger/header never shifts when it
+   appears or disappears. */
+.user-menu-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: #e11d48;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  box-shadow: 0 0 0 2px #0f172a;
+  pointer-events: none;
+  animation: user-menu-badge-pulse 450ms ease-out;
+}
+@keyframes user-menu-badge-pulse {
+  0% {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+  55% {
+    transform: scale(1.3);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 .user-menu-avatar-initials {
   display: inline-flex;
@@ -448,10 +489,26 @@
   font-size: 12px;
   font-weight: 700;
 }
+.user-menu-workspace-text {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+  flex: 1;
+}
+/* The "New" pill sits in its own flex row, outside the ellipsis-truncated
+   label -- a long owner name truncates ON ITS OWN (flex-shrink), but the
+   pill (and the role text next to it) never gets clipped off along with it. */
+.user-menu-workspace-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
 .user-menu-workspace-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 .user-menu-workspace-item[aria-checked='true'] {
   font-weight: 600;
@@ -459,6 +516,27 @@
 .user-menu-workspace-role {
   color: var(--text-muted);
   font-weight: 400;
+}
+.user-menu-new-pill {
+  display: inline-block;
+  flex-shrink: 0;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+.user-menu-role-changed {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 @media (max-width: 768px) {
   .user-menu-name {

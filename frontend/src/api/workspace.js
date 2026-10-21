@@ -30,6 +30,22 @@ export async function switchWorkspace(ownerUserId) {
   return handleResponse(res)
 }
 
+export async function fetchNotifications() {
+  const res = await fetch(`${BASE}/notifications`, { credentials: 'include' })
+  return handleResponse(res)
+}
+
+// shareId: null marks every unseen share seen; a specific id marks just that one.
+export async function markNotificationsSeen(shareId = null) {
+  const res = await fetch(`${BASE}/notifications/seen`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ share_id: shareId }),
+  })
+  return handleResponse(res)
+}
+
 export async function fetchShares() {
   const res = await fetch(`${BASE}/shares`, { credentials: 'include' })
   return handleResponse(res)

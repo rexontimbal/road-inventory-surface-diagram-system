@@ -177,7 +177,14 @@ def _matches_filters(
 
 
 def _filtered_entries(db, *, scope, search, action, date_range, by_user=None):
-    query = apply_scope(db.query(UploadLogEntry), UploadLogEntry, scope).order_by(UploadLogEntry.timestamp.desc())
+    # id as a tiebreaker: timestamp alone is only ISO-string precision, and
+    # two entries written microseconds apart in a fast sequence (a test, or
+    # any back-to-back write) can land on the exact same string -- without a
+    # strictly-increasing secondary key, their relative order on a tie isn't
+    # guaranteed stable across queries/engines.
+    query = apply_scope(db.query(UploadLogEntry), UploadLogEntry, scope).order_by(
+        UploadLogEntry.timestamp.desc(), UploadLogEntry.id.desc()
+    )
     days = _DATE_RANGE_DAYS.get(date_range) if date_range else None
     if days:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)

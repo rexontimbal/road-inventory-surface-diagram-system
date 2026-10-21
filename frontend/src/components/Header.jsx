@@ -71,6 +71,8 @@ const Header = forwardRef(function Header(
     workspaceContext,
     onSwitchWorkspace,
     onOpenShare,
+    notifications,
+    onDropdownClose,
   },
   ref
 ) {
@@ -204,6 +206,8 @@ const Header = forwardRef(function Header(
               onOpenHistory={onOpenHistory}
               workspaceContext={workspaceContext}
               onSwitchWorkspace={onSwitchWorkspace}
+              notifications={notifications}
+              onDropdownClose={onDropdownClose}
             />
           ) : (
             <button type="button" className="header-signin-btn" onClick={() => setSignInOpen(true)}>
