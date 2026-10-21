@@ -236,7 +236,13 @@ function wouldHaveSentence(entry) {
   return parts.length > 0 ? `${parts.join(', ')}.` : null
 }
 
-export default function UploadHistoryModal({ onClose, triggerRef, initialExpandedId }) {
+export default function UploadHistoryModal({ onClose, triggerRef, initialExpandedId, workspaceContext }) {
+  // Mirrors the same "own this workspace?" check the backend's
+  // require_owner enforces -- role is always 'owner' for mode 'own', so
+  // this covers both "haven't loaded context yet" (assume owner, matches
+  // every other canEdit-style check in the app) and the real shared case.
+  const isOwner = !workspaceContext || workspaceContext.role === 'owner'
+  const ownerName = workspaceContext?.mode === 'shared' ? workspaceContext.owner_name : null
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [action, setAction] = useState('all')
@@ -354,14 +360,30 @@ export default function UploadHistoryModal({ onClose, triggerRef, initialExpande
       variant: 'danger',
     })
     if (!confirmed) return
-    await clearUploadLog()
-    showToast({ variant: 'success', message: 'Upload history cleared' })
-    setPage(1)
-    setData(null)
-    setLoading(true)
-    const res = await fetchUploadLog({ search, action, dateRange, byUser }, 1, pageSize)
-    setData(res)
-    setLoading(false)
+    try {
+      const { cleared } = await clearUploadLog()
+      showToast({
+        variant: 'success',
+        message: `Upload history cleared${cleared != null ? ` (${cleared} entr${cleared === 1 ? 'y' : 'ies'})` : ''}`,
+      })
+      setPage(1)
+      setData(null)
+      setLoading(true)
+      const res = await fetchUploadLog({ search, action, dateRange, byUser }, 1, pageSize)
+      setData(res)
+      setLoading(false)
+    } catch (err) {
+      // Never fail silently -- a 403 here means the active workspace isn't
+      // this account's own (an Editor/Viewer shouldn't be able to reach
+      // this at all now that the button is disabled for them, but the
+      // active workspace can also change server-side between opening the
+      // modal and clicking the button, e.g. the owner revoking access).
+      const message =
+        err.status === 403
+          ? `Only the owner${ownerName ? ` (${ownerName})` : ''} can clear this history.`
+          : `Could not clear history: ${err.message}`
+      showToast({ variant: 'danger', message })
+    }
   }
 
   const exportUrl = getUploadLogExportUrl({ search, action, dateRange, byUser })
@@ -432,9 +454,9 @@ export default function UploadHistoryModal({ onClose, triggerRef, initialExpande
               type="button"
               className="history-header-btn history-header-btn-clear"
               onClick={handleClearHistory}
-              disabled={!hasLogs}
-              title="Clear history"
-              aria-label="Clear history"
+              disabled={!hasLogs || !isOwner}
+              title={isOwner ? 'Clear history' : 'Only the owner can clear the history.'}
+              aria-label={isOwner ? 'Clear history' : 'Only the owner can clear the history.'}
             >
               <svg className="history-header-btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path

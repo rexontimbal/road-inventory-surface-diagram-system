@@ -685,6 +685,7 @@ export default function App() {
             collapsed={sidebarCollapsed}
             onExpand={() => setSidebarCollapsed(false)}
             canEdit={canEdit}
+            workspaceContext={workspaceContext}
           />
           <SectionSelectPanel
             districts={districts}

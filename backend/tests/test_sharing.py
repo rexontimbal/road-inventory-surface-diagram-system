@@ -64,6 +64,49 @@ def test_editor_can_write_but_not_manage_sharing(client, make_user, as_user, upl
         assert clear_log_res.status_code == 403  # owner-only, even for an editor
 
 
+def test_owner_clears_own_workspace_only_including_sharing_logs(client, make_user, as_user, upload_fixture_as):
+    """Clear History is owner-only (already covered above for viewer/editor
+    403s) and, for the owner, must wipe every log entry of their OWN active
+    workspace -- uploads AND sharing events (SHARED/ROLE CHANGED/ACCESS
+    REMOVED all write through the same write_log_entry/owner_kwargs path,
+    see app/upload_log.py and app/routers/workspace.py) -- while leaving a
+    completely unrelated workspace's own history untouched."""
+    owner = make_user("Owner-Clear", "owner-clear-test@example.com")
+    collaborator = make_user("Collaborator-Clear", "collab-clear-test@example.com")
+    other_owner = make_user("Other-Owner-Clear", "other-owner-clear-test@example.com")
+
+    upload_fixture_as(owner)
+    with as_user(owner):
+        share_res = client.post(
+            "/api/workspace/shares", json={"email": "collab-clear-test@example.com", "role": "viewer"}
+        )
+        share_id = share_res.json()["id"]
+        client.patch(f"/api/workspace/shares/{share_id}", json={"role": "editor"})
+        client.delete(f"/api/workspace/shares/{share_id}")
+
+    # A second, unrelated owner with their own log entries -- must survive
+    # the first owner's clear untouched.
+    upload_fixture_as(other_owner)
+
+    with as_user(owner):
+        before = client.get("/api/roads/upload-log", params={"page": 1, "page_size": 50}).json()
+        share_entry_count = sum(1 for e in before["entries"] if e["kind"] == "share")
+        assert share_entry_count == 3  # SHARED, ROLE CHANGED, ACCESS REMOVED
+        assert before["total_records"] >= 4  # 1 upload + the 3 sharing entries above
+
+        clear_res = client.delete("/api/roads/upload-log")
+        assert clear_res.status_code == 200
+        assert clear_res.json()["cleared"] == before["total_records"]
+
+        after = client.get("/api/roads/upload-log", params={"page": 1, "page_size": 50}).json()
+        assert after["total_records"] == 0
+
+    # The other owner's own history is completely unaffected.
+    with as_user(other_owner):
+        other_log = client.get("/api/roads/upload-log", params={"page": 1, "page_size": 50}).json()
+        assert other_log["total_records"] >= 1
+
+
 def test_removed_user_loses_access_immediately(client, make_user, as_user):
     owner = make_user("Owner3", "owner-remove-test@example.com")
     collaborator = make_user("Collaborator", "collab-remove-test@example.com")

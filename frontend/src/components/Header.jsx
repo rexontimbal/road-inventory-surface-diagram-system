@@ -91,9 +91,12 @@ const Header = forwardRef(function Header(
     return () => registerHeaderToastSlot(null)
   }, [])
   // Sharing always operates on the CALLER's own workspace (see
-  // app/routers/workspace.py) -- the button only makes sense while viewing
-  // your own data, not someone else's shared-with-you workspace.
-  const canShare = authUser && workspaceContext?.mode === 'own'
+  // app/routers/workspace.py) -- shown (not hidden) while viewing someone
+  // else's shared-with-you workspace, same disabled+tooltip pattern as
+  // Clear History, rather than vanishing and leaving no explanation for
+  // why it's gone.
+  const canShare = !!authUser
+  const isOwnWorkspace = !workspaceContext || workspaceContext.mode === 'own'
 
   // Lets GuestNotice's "Sign in" link (a sibling of Header, not a child)
   // open this same modal instead of duplicating sign-in UI elsewhere.
@@ -200,7 +203,14 @@ const Header = forwardRef(function Header(
             ?
           </button>
           {canShare && (
-            <button type="button" className="btn-compact header-share-btn" onClick={onOpenShare}>
+            <button
+              type="button"
+              className="btn-compact header-share-btn"
+              onClick={isOwnWorkspace ? onOpenShare : undefined}
+              disabled={!isOwnWorkspace}
+              title={isOwnWorkspace ? undefined : 'Only the owner can do this.'}
+              aria-label={isOwnWorkspace ? 'Share' : 'Only the owner can do this.'}
+            >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path
                   d="M16 6a3 3 0 1 0-2.83-4H13A3 3 0 1 0 16 6ZM6 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm12 6a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM8.6 13.5l6.8-3.9M8.6 14.5l6.8 3.9"

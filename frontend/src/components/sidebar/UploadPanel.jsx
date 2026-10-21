@@ -73,7 +73,7 @@ function buildUploadToast(res) {
 }
 
 const UploadPanel = forwardRef(function UploadPanel(
-  { onUploaded, onRestored, roads, uploadMeta, onExpand, canEdit = true },
+  { onUploaded, onRestored, roads, uploadMeta, onExpand, canEdit = true, workspaceContext },
   ref
 ) {
   const fileInputRef = useRef(null)
@@ -492,6 +492,7 @@ const UploadPanel = forwardRef(function UploadPanel(
           }}
           triggerRef={historyBtnRef}
           initialExpandedId={historyInitialExpandedId}
+          workspaceContext={workspaceContext}
         />
       )}
 

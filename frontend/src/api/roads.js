@@ -9,7 +9,12 @@ async function handleResponse(res) {
     } catch {
       // ignore body parse failure, fall back to statusText
     }
-    throw new Error(detail)
+    const error = new Error(detail)
+    // Lets callers distinguish "you're not allowed" (403, e.g. an Editor/
+    // Viewer hitting an owner-only endpoint) from any other failure without
+    // sniffing the message text -- used by Clear History's error toast.
+    error.status = res.status
+    throw error
   }
   return res.json()
 }
