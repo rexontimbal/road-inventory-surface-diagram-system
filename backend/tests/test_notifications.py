@@ -18,6 +18,97 @@ def _login_as(client, scope):
     client.cookies.set("session", create_session_token(scope.user_id))
 
 
+def _fake_google_verify(sub, email, name):
+    def fn(token):
+        return {"sub": sub, "email": email, "name": name, "picture": None}
+
+    return fn
+
+
+def test_pending_invite_then_first_sign_in_counts_as_one_unseen(client, make_user, as_user, monkeypatch):
+    """The share row is created (and already correctly unseen) BEFORE the
+    invited person has ever signed in -- POST /api/auth/google's activation
+    only sets user_id on that row, so it must still read as a brand new
+    notification the moment they do. This was never actually broken (see
+    the sibling test below for the real regression), but it's the scenario
+    from the bug report and worth locking in directly."""
+    owner = make_user("Owner-Pending", "owner-pending-notif@example.com")
+
+    with as_user(owner):
+        share_res = client.post(
+            "/api/workspace/shares", json={"email": "newperson-pending-notif@example.com", "role": "viewer"}
+        )
+    assert share_res.json()["pending"] is True
+
+    monkeypatch.setattr(
+        "app.routers.auth.verify_google_id_token",
+        _fake_google_verify("google-id-pending-notif", "newperson-pending-notif@example.com", "New Person"),
+    )
+    signin_res = client.post("/api/auth/google", json={"id_token": "fake-token"})
+    assert signin_res.status_code == 200
+    new_user_id = signin_res.json()["user"]["id"]
+
+    client.cookies.set("session", create_session_token(new_user_id))
+    notif = client.get("/api/workspace/notifications").json()
+    assert notif["new_count"] == 1
+    assert notif["items"][0]["last_change"] == "shared"
+    assert notif["items"][0]["is_new"] is True
+
+
+def test_signing_in_as_a_different_account_does_not_leak_the_previous_ones_notifications(
+    client, make_user, as_user, monkeypatch
+):
+    """THE regression: two real Google accounts signed into the same
+    browser, one after another, without the second one ever touching the
+    avatar dropdown. account_a switches into owner's shared workspace
+    (via POST /switch, the one call that marks a share seen) -- then
+    account_b signs in fresh. account_b's own still-unseen share from the
+    SAME owner must not have been silently marked seen along the way.
+
+    POST /api/auth/google must also clear any active_workspace cookie left
+    behind by whoever was signed in before -- otherwise account_b's very
+    first /workspace/context read resolves into account_a's last-viewed
+    workspace by cookie alone, before account_b has done anything at all."""
+    owner = make_user("Owner-Leak", "owner-leak-notif@example.com")
+    account_a = make_user("Account-A-Leak", "a-leak-notif@example.com")
+
+    with as_user(owner):
+        client.post("/api/workspace/shares", json={"email": "a-leak-notif@example.com", "role": "editor"})
+        share_b_res = client.post(
+            "/api/workspace/shares", json={"email": "b-leak-notif@example.com", "role": "viewer"}
+        )
+    share_b_id = share_b_res.json()["id"]
+
+    # Account A signs in (real session cookie) and explicitly switches into
+    # the owner's workspace -- the one action that's actually supposed to
+    # mark THEIR OWN share seen, and that leaves an active_workspace cookie
+    # sitting in the (shared, in a real browser) cookie jar.
+    client.cookies.set("session", create_session_token(account_a.user_id))
+    switch_res = client.post("/api/workspace/switch", json={"owner_user_id": owner.user_id})
+    assert switch_res.status_code == 200
+
+    # Account B signs in next, in the same cookie jar (this TestClient
+    # instance), WITHOUT ever calling /switch or /notifications/seen.
+    monkeypatch.setattr(
+        "app.routers.auth.verify_google_id_token",
+        _fake_google_verify("google-id-b-leak-notif", "b-leak-notif@example.com", "Account B"),
+    )
+    signin_res = client.post("/api/auth/google", json={"id_token": "fake-token"})
+    assert signin_res.status_code == 200
+    account_b_id = signin_res.json()["user"]["id"]
+
+    # The stale active_workspace cookie from A must be gone -- B's context
+    # should read "own", not silently resolve into owner's workspace.
+    context_res = client.get("/api/workspace/context").json()
+    assert context_res["mode"] == "own"
+
+    # And B's own share notification must still be unseen.
+    notif = client.get("/api/workspace/notifications").json()
+    assert notif["new_count"] == 1
+    item = next(i for i in notif["items"] if i["share_id"] == share_b_id)
+    assert item["is_new"] is True
+
+
 def test_new_share_counts_as_one_unseen(client, make_user, as_user):
     owner = make_user("Owner-N1", "owner-notif1@example.com")
     recipient = make_user("Recipient-N1", "recipient-notif1@example.com")

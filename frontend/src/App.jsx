@@ -87,6 +87,16 @@ export default function App() {
   // before the /api/auth/me check resolves.
   const [authUser, setAuthUser] = useState(null)
   const [authChecked, setAuthChecked] = useState(false)
+  // Mirrors authUser.id, updated in the SAME call as setAuthUser (not a
+  // separate effect) -- the active-workspace localStorage key is scoped by
+  // this id (see utils/activeWorkspace.js), and reading it correctly
+  // requires the CURRENT user synchronously, before React has necessarily
+  // re-rendered with the new authUser state.
+  const authUserIdRef = useRef(null)
+  function setAuthUserAndRef(user) {
+    authUserIdRef.current = user?.id ?? null
+    setAuthUser(user)
+  }
   // Which workspace is active -- own data, or (if shared with this account)
   // someone else's -- per /api/workspace/context. null while signed out or
   // not yet loaded; the header/switcher/banner all treat that as "own".
@@ -109,7 +119,7 @@ export default function App() {
   async function refreshWorkspaceContext() {
     const context = await fetchWorkspaceContext().catch(() => null)
     setWorkspaceContext(context)
-    writeActiveWorkspaceOwnerId(context?.mode === 'shared' ? context.owner_user_id : null)
+    writeActiveWorkspaceOwnerId(authUserIdRef.current, context?.mode === 'shared' ? context.owner_user_id : null)
     if (context?.access_removed_owner_name) {
       showToast({
         variant: 'info',
@@ -164,21 +174,24 @@ export default function App() {
   useEffect(() => {
     fetchMe()
       .then(async (res) => {
-        setAuthUser(res.user)
+        setAuthUserAndRef(res.user)
         if (!res.user) return
         // The active_workspace cookie (if any) already survives a reload on
         // its own -- this localStorage value only matters as a courtesy
         // re-confirmation, converting "assume the cookie is still valid"
         // into "ask the backend to confirm it, and fall back to My data if
-        // that access was removed while this browser was closed."
-        const savedOwnerId = readActiveWorkspaceOwnerId()
+        // that access was removed while this browser was closed." Scoped to
+        // THIS user's own id -- see utils/activeWorkspace.js for why that
+        // scoping matters (a stale OTHER account's choice must never be
+        // replayed as this one's).
+        const savedOwnerId = readActiveWorkspaceOwnerId(res.user.id)
         if (savedOwnerId != null) {
-          await switchWorkspace(savedOwnerId).catch(() => writeActiveWorkspaceOwnerId(null))
+          await switchWorkspace(savedOwnerId).catch(() => writeActiveWorkspaceOwnerId(res.user.id, null))
         }
         await refreshWorkspaceContext()
         await refreshNotifications({ toastNew: true })
       })
-      .catch(() => setAuthUser(null))
+      .catch(() => setAuthUserAndRef(null))
       .finally(() => setAuthChecked(true))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -240,7 +253,7 @@ export default function App() {
   // still-open modal.
   async function handleGoogleCredential(idToken) {
     const res = await signInWithGoogle(idToken)
-    setAuthUser(res.user)
+    setAuthUserAndRef(res.user)
     showToast({ variant: 'success', message: `Signed in as ${res.user.name}` })
     // Guest data is never moved into an account -- it just stays in the
     // guest sandbox and expires on its own TTL (GuestNotice already shows
@@ -255,8 +268,9 @@ export default function App() {
     }
     // A fresh sign-in via the button (as opposed to the on-mount restore
     // above) never carries over a previous account's workspace choice --
-    // whatever active_workspace cookie happens to exist is this account's
-    // own history, fetched fresh rather than assumed.
+    // POST /api/auth/google itself clears any leftover active_workspace
+    // cookie from whoever was signed in before, so this always starts from
+    // "my data" regardless of what the browser was doing a moment ago.
     await refreshWorkspaceContext()
     await refreshAfterScopeChange()
     await refreshNotifications({ toastNew: true })
@@ -268,16 +282,21 @@ export default function App() {
 
   async function handleSignOut() {
     try {
+      // Tied to the account that's about to sign out -- read before
+      // clearing authUserIdRef below, so the right localStorage key gets
+      // cleared rather than silently no-op'ing on a null id.
+      const outgoingUserId = authUserIdRef.current
       await signOut()
-      setAuthUser(null)
+      setAuthUserAndRef(null)
       setWorkspaceContext(null)
       setNotifications({ new_count: 0, items: [], pulseKey: 0 })
       prevNewCountRef.current = 0
       notifiedKeysRef.current = new Set()
-      // Tied to the account that just signed out -- carrying it over to
-      // whichever account signs in next in this same browser would put
-      // them straight into a workspace that was never shared with THEM.
-      writeActiveWorkspaceOwnerId(null)
+      // Carrying this over to whichever account signs in next in this same
+      // browser would put them straight into a workspace that was never
+      // shared with THEM -- /api/auth/logout also clears the active_workspace
+      // cookie itself for the same reason.
+      writeActiveWorkspaceOwnerId(outgoingUserId, null)
       showToast({ variant: 'info', message: 'Signed out' })
       await refreshAfterScopeChange()
     } catch (err) {

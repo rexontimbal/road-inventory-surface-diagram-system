@@ -126,3 +126,158 @@ def test_badge_shows_shares_and_role_changes_and_clears_on_dropdown_close(two_te
         assert item["last_change"] == "role_changed"
 
         browser.close()
+
+
+@pytest.fixture
+def owner_and_pending_invite():
+    """A share to an email with no User row yet (a pending invite) --
+    activation (setting user_id once that email signs in) is simulated at
+    the DB level the same way POST /api/auth/google's own activation query
+    does, since real Google OAuth can't be driven from here."""
+    now = datetime.now(timezone.utc).isoformat()
+    db = SessionLocal()
+    owner = User(
+        google_id="e2e-pending-owner", name="E2E Pending Owner", email="e2e-pending-owner@example.com",
+        created_at=now, last_login_at=now,
+    )
+    db.add(owner)
+    db.commit()
+    owner_id = owner.id
+    yield owner_id
+    cleanup_db = SessionLocal()
+    cleanup_db.query(WorkspaceShare).filter(WorkspaceShare.owner_user_id == owner_id).delete(synchronize_session=False)
+    cleanup_db.query(User).filter(User.id == owner_id).delete(synchronize_session=False)
+    cleanup_db.commit()
+
+
+def test_badge_visible_on_first_load_after_a_pending_invite_is_activated(owner_and_pending_invite):
+    owner_id = owner_and_pending_invite
+    token_owner = create_session_token(owner_id)
+
+    status, body = _api(
+        "POST", "/api/workspace/shares", token_owner, {"email": "e2e-pending-recipient@example.com", "role": "viewer"}
+    )
+    assert status == 200
+    assert body["pending"] is True
+    share_id = body["id"]
+
+    now = datetime.now(timezone.utc).isoformat()
+    db = SessionLocal()
+    recipient = User(
+        google_id="e2e-pending-recipient", name="E2E Pending Recipient", email="e2e-pending-recipient@example.com",
+        created_at=now, last_login_at=now,
+    )
+    db.add(recipient)
+    db.commit()
+    recipient_id = recipient.id
+    row = db.query(WorkspaceShare).filter(WorkspaceShare.id == share_id).first()
+    row.user_id = recipient_id
+    db.commit()
+    db.close()
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(channel="chrome", headless=True)
+            context = browser.new_context(viewport={"width": 1366, "height": 900})
+            page = context.new_page()
+            context.add_cookies(
+                [{
+                    "name": "session", "value": create_session_token(recipient_id), "domain": "localhost",
+                    "path": "/", "httpOnly": True, "secure": False, "sameSite": "Lax",
+                }]
+            )
+            # First-ever page load for this just-activated account.
+            page.goto(FRONTEND)
+            page.wait_for_timeout(1500)
+
+            badge = page.locator(".user-menu-badge")
+            assert badge.count() == 1, "badge did not appear for a newly-activated pending invite"
+            assert badge.inner_text() == "1"
+
+            browser.close()
+    finally:
+        db2 = SessionLocal()
+        # The share row (owned by owner_and_pending_invite's owner) must go
+        # first -- it FK-references this recipient via user_id.
+        db2.query(WorkspaceShare).filter(WorkspaceShare.id == share_id).delete(synchronize_session=False)
+        db2.query(User).filter(User.id == recipient_id).delete(synchronize_session=False)
+        db2.commit()
+
+
+def test_account_switch_in_the_same_browser_does_not_leak_notification_state(two_temp_users):
+    """THE regression, reproduced through the actual browser rather than
+    direct API calls: account A signs in, switches into the owner's shared
+    workspace (the one action that legitimately marks THEIR share seen) --
+    then, in the SAME browser (same localStorage/cookies), a second,
+    unrelated account also shared by that owner loads the app for the
+    first time, never touching the dropdown or switcher itself. Their
+    badge must still show -- nothing about account A's session should have
+    touched account B's notification state."""
+    owner_id, account_a_id = two_temp_users
+    token_owner = create_session_token(owner_id)
+    token_a = create_session_token(account_a_id)
+
+    now = datetime.now(timezone.utc).isoformat()
+    db = SessionLocal()
+    account_b = User(
+        google_id="e2e-leak-b", name="E2E Leak Account B", email="e2e-leak-b@example.com",
+        created_at=now, last_login_at=now,
+    )
+    db.add(account_b)
+    db.commit()
+    account_b_id = account_b.id
+    db.close()
+    token_b = create_session_token(account_b_id)
+
+    try:
+        _api("POST", "/api/workspace/shares", token_owner, {"email": "e2e-badge-recipient@example.com", "role": "editor"})
+        status, body = _api("POST", "/api/workspace/shares", token_owner, {"email": "e2e-leak-b@example.com", "role": "viewer"})
+        share_b_id = body["id"]
+
+        with sync_playwright() as p:
+            browser = p.chromium.launch(channel="chrome", headless=True)
+            context = browser.new_context(viewport={"width": 1366, "height": 900})
+            page = context.new_page()
+
+            context.add_cookies(
+                [{"name": "session", "value": token_a, "domain": "localhost", "path": "/", "httpOnly": True, "secure": False, "sameSite": "Lax"}]
+            )
+            page.goto(FRONTEND)
+            page.wait_for_timeout(1200)
+            page.locator(".user-menu-trigger").click()
+            page.wait_for_timeout(300)
+            page.locator(".user-menu-workspace-item", has_text="E2E Badge Owner").click()
+            page.wait_for_timeout(800)
+
+            # Same browser context (same localStorage/cookies) -- account B
+            # signs in next WITHOUT the app's own "Sign out" ever running,
+            # same as picking a different account from Google's chooser.
+            # (Injecting the session cookie directly, same as every other
+            # test here, since real Google OAuth can't be driven from this
+            # suite -- that means this specific swap bypasses POST
+            # /api/auth/google's own active_workspace-cookie clearing, so
+            # it isn't what exercises THAT half of the fix; see backend/
+            # tests/test_notifications.py's TestClient-based equivalent for
+            # that. What this live run DOES prove end-to-end is the part
+            # that actually produced the reported symptom: the frontend's
+            # localStorage-driven mount-time restore is scoped per account,
+            # so it can't silently mark B's own share seen using A's saved
+            # choice.)
+            context.add_cookies(
+                [{"name": "session", "value": token_b, "domain": "localhost", "path": "/", "httpOnly": True, "secure": False, "sameSite": "Lax"}]
+            )
+            page.goto(FRONTEND)
+            page.wait_for_timeout(1500)
+
+            badge = page.locator(".user-menu-badge")
+            assert badge.count() == 1, "account B's badge was cleared by account A's leftover session state"
+            assert badge.inner_text() == "1"
+
+            browser.close()
+    finally:
+        db2 = SessionLocal()
+        db2.query(WorkspaceShare).filter(
+            (WorkspaceShare.owner_user_id == account_b_id) | (WorkspaceShare.user_id == account_b_id)
+        ).delete(synchronize_session=False)
+        db2.query(User).filter(User.id == account_b_id).delete(synchronize_session=False)
+        db2.commit()

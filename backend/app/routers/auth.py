@@ -13,7 +13,7 @@ from app.auth import (
 from app.db import get_db
 from app.models import User, WorkspaceShare
 from app.schemas import GoogleAuthIn, MeOut, UserOut
-from app.scope import normalize_email
+from app.scope import ACTIVE_WORKSPACE_COOKIE_NAME, normalize_email
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -66,6 +66,17 @@ def auth_google(body: GoogleAuthIn, request: Request, response: Response, db: Se
 
     token = create_session_token(user.id)
     response.set_cookie(SESSION_COOKIE_NAME, token, **cookie_kwargs(request))
+    # Defensive, not just belt-and-suspenders: a browser that signs in as a
+    # DIFFERENT Google account without ever clicking this app's own "Sign
+    # out" (picking a different account from Google's own chooser instead)
+    # would otherwise keep whatever active_workspace cookie the previous
+    # account left behind -- which this new account could coincidentally
+    # also have a real share for, silently landing them in someone else's
+    # workspace on their very first sign-in. Every sign-in starts clean;
+    # the frontend's own mount-time restore (scoped to this user's own
+    # localStorage key) is what re-establishes a real prior choice, not
+    # whatever cookie happened to already be sitting there.
+    response.delete_cookie(ACTIVE_WORKSPACE_COOKIE_NAME, path="/")
 
     return {"user": _user_out(user)}
 
@@ -80,4 +91,8 @@ def auth_me(user: User | None = Depends(get_current_user)):
 @router.post("/logout")
 def auth_logout(request: Request, response: Response):
     response.delete_cookie(SESSION_COOKIE_NAME, path="/", samesite="lax")
+    # Same reasoning as the sign-in path above -- whoever signs in next in
+    # this browser must start from "my data", not whatever workspace this
+    # account happened to be viewing.
+    response.delete_cookie(ACTIVE_WORKSPACE_COOKIE_NAME, path="/")
     return {"ok": True}
