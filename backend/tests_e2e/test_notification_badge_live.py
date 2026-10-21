@@ -281,3 +281,102 @@ def test_account_switch_in_the_same_browser_does_not_leak_notification_state(two
         ).delete(synchronize_session=False)
         db2.query(User).filter(User.id == account_b_id).delete(synchronize_session=False)
         db2.commit()
+
+
+def test_role_change_shows_badge_and_toast_within_15s_while_on_my_data(two_temp_users):
+    """B is on "My data" (never switched into the shared workspace) when A
+    changes their role -- the live poll (15s, tab stays visible/focused the
+    whole time) must pick it up without a reload, both the badge and the
+    exact toast wording the role-change case uses."""
+    owner_id, recipient_id = two_temp_users
+    token_owner = create_session_token(owner_id)
+    token_recipient = create_session_token(recipient_id)
+
+    status, body = _api(
+        "POST", "/api/workspace/shares", token_owner, {"email": "e2e-badge-recipient@example.com", "role": "editor"}
+    )
+    assert status == 200
+    share_id = body["id"]
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel="chrome", headless=True)
+        context = browser.new_context(viewport={"width": 1366, "height": 900})
+        page = context.new_page()
+        context.add_cookies(
+            [{"name": "session", "value": token_recipient, "domain": "localhost", "path": "/", "httpOnly": True, "secure": False, "sameSite": "Lax"}]
+        )
+        page.goto(FRONTEND)
+        page.wait_for_timeout(1200)
+
+        # B marks the initial share seen (dropdown open/close) and stays on
+        # "My data" -- so the only thing that should bring the badge back
+        # is the live poll noticing the role change below.
+        page.locator(".user-menu-trigger").click()
+        page.wait_for_timeout(300)
+        page.locator("body").click(position={"x": 5, "y": 5})
+        page.wait_for_timeout(500)
+        assert page.locator(".user-menu-badge").count() == 0
+
+        status, body = _api("PATCH", f"/api/workspace/shares/{share_id}", token_owner, {"role": "viewer"})
+        assert status == 200
+
+        page.wait_for_timeout(17000)  # > the 15s poll interval
+
+        badge = page.locator(".user-menu-badge")
+        assert badge.count() == 1, "badge did not reappear within 15s of a role change"
+        assert badge.inner_text() == "1"
+
+        toast = page.locator(".header-toast, .toast-stack .toast")
+        assert toast.count() == 1, "role-change toast did not appear within 15s"
+        assert "changed to Viewer" in toast.first.inner_text()
+
+        browser.close()
+
+
+def test_viewing_workspace_updates_role_live_on_role_change(two_temp_users):
+    """B is actively VIEWING the owner's shared workspace (switched into it
+    via the dropdown) when A changes their role -- the banner text and the
+    role-gated controls (e.g. the upload button) must update live from the
+    same poll that refreshes workspaceContext, with no reload and without
+    the poll itself re-marking anything or calling /switch again."""
+    owner_id, recipient_id = two_temp_users
+    token_owner = create_session_token(owner_id)
+    token_recipient = create_session_token(recipient_id)
+
+    status, body = _api(
+        "POST", "/api/workspace/shares", token_owner, {"email": "e2e-badge-recipient@example.com", "role": "viewer"}
+    )
+    assert status == 200
+    share_id = body["id"]
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel="chrome", headless=True)
+        context = browser.new_context(viewport={"width": 1366, "height": 900})
+        page = context.new_page()
+        context.add_cookies(
+            [{"name": "session", "value": token_recipient, "domain": "localhost", "path": "/", "httpOnly": True, "secure": False, "sameSite": "Lax"}]
+        )
+        page.goto(FRONTEND)
+        page.wait_for_timeout(1200)
+
+        page.locator(".user-menu-trigger").click()
+        page.wait_for_timeout(300)
+        page.locator(".user-menu-workspace-item", has_text="E2E Badge Owner").click()
+        page.wait_for_timeout(1000)
+
+        banner_before = page.locator(".workspace-banner-text").inner_text()
+        assert "View only" in banner_before
+        upload_before = page.locator("button", has_text="Choose Excel File")
+        assert upload_before.is_disabled()
+
+        status, body = _api("PATCH", f"/api/workspace/shares/{share_id}", token_owner, {"role": "editor"})
+        assert status == 200
+
+        page.wait_for_timeout(17000)
+
+        banner_after = page.locator(".workspace-banner-text").inner_text()
+        assert "Editor" in banner_after, "banner did not pick up the new role live"
+        upload_after = page.locator("button", has_text="Choose Excel File")
+        assert not upload_after.is_disabled(), "edit controls did not unlock live after the role change"
+
+        browser.close()

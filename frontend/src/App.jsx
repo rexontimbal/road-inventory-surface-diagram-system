@@ -142,7 +142,7 @@ export default function App() {
         const roleLabel = item.role === 'editor' ? 'Editor' : 'Viewer'
         const isRoleChange = item.last_change === 'role_changed'
         const message = isRoleChange
-          ? `${item.owner_name} changed your access · ${roleLabel}`
+          ? `Your access to ${item.owner_name}'s data changed to ${roleLabel}`
           : `${item.owner_name} shared their data with you · ${roleLabel}`
         showToast({
           variant: 'info',
@@ -196,12 +196,23 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Live updates (Part 6): poll while the tab is visible, pause while
-  // hidden -- a background tab doesn't need a badge that's accurate to the
-  // second, and skipping the fetch there avoids surprising the user with a
-  // toast for a share they never actually looked away from. Catches back up
-  // immediately on regaining visibility rather than waiting out the rest of
-  // whatever the last 60s interval had left.
+  // Live updates: poll while the tab is visible, pause while hidden -- a
+  // background tab doesn't need a badge that's accurate to the second, and
+  // skipping the fetch there avoids surprising the user with a toast for a
+  // share they never actually looked away from. Catches back up immediately
+  // on regaining visibility OR window focus (switching back from another
+  // app/window doesn't fire visibilitychange on its own) rather than
+  // waiting out the rest of whatever the last interval had left -- a role
+  // change landing while this tab was in the background should be visible
+  // the moment the user actually looks at it again, not up to 15s later.
+  //
+  // refreshWorkspaceContext() here is a plain GET and never marks anything
+  // seen or switches workspace on its own (that only happens from an
+  // explicit dropdown-close or workspace click) -- so polling while B is
+  // actively VIEWING a workspace A changed their role on is exactly what
+  // lets the banner/edit-controls (both driven by workspaceContext.role)
+  // pick up the new role live, with no special-casing needed here: the
+  // same context refresh that updates the badge also updates the role.
   useEffect(() => {
     if (!authUser) return
     function tick() {
@@ -209,14 +220,16 @@ export default function App() {
       refreshNotifications({ toastNew: true })
       refreshWorkspaceContext()
     }
-    const interval = setInterval(tick, 60000)
+    const interval = setInterval(tick, 15000)
     function handleVisibility() {
       if (!document.hidden) tick()
     }
     document.addEventListener('visibilitychange', handleVisibility)
+    window.addEventListener('focus', tick)
     return () => {
       clearInterval(interval)
       document.removeEventListener('visibilitychange', handleVisibility)
+      window.removeEventListener('focus', tick)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authUser])
