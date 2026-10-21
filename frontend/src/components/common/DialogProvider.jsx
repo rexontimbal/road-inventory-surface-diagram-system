@@ -63,6 +63,16 @@ const EXIT_DURATION_MS = 180
 // Below this, the header's free space is too cramped for even the compact
 // one-line card -- falls back to the normal centered stack instead.
 const HEADER_SLOT_MIN_PX = 280
+// The countdown bar fades (opacity 1 -> 0.6) over exactly this long, ending
+// right as the bar itself finishes -- a fixed-length fade timed via
+// animation-delay rather than a keyframe percentage, so it reads as "last
+// 1 second" regardless of whether the toast's own duration is 4s or 8s.
+const FADE_WARN_MS = 1000
+
+const prefersReducedMotion =
+  typeof window !== 'undefined' && window.matchMedia
+    ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    : false
 
 function ToastVariantIcon({ variant }) {
   if (variant === 'success') {
@@ -102,13 +112,64 @@ function ToastVariantIcon({ variant }) {
   )
 }
 
+/**
+ * The countdown bar IS the auto-dismiss timer -- `onComplete` (startClose)
+ * fires off the bar's own `animationend`, not a parallel setTimeout, so
+ * pausing on hover (plain CSS `animation-play-state`, no JS involved) and
+ * resuming exactly where it left off are both free: there's no separate
+ * clock to keep in sync with the visual. prefers-reduced-motion is the one
+ * exception -- animation is suppressed (bar just hidden) so animationend
+ * would never fire, and a plain setTimeout stands in for it instead.
+ */
+function ToastProgressBar({ id, variant, duration, onComplete }) {
+  useEffect(() => {
+    if (!prefersReducedMotion) return undefined
+    const timeoutId = setTimeout(onComplete, duration)
+    return () => clearTimeout(timeoutId)
+    // onComplete (startClose) is stable in identity terms that matter here --
+    // it's keyed by `id`, not a closure over this render's other state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, duration])
+
+  if (prefersReducedMotion) {
+    return (
+      <div className={`toast-progress-track toast-progress-track-${variant}`}>
+        <div className={`toast-progress-bar toast-progress-${variant}`} style={{ opacity: 0 }} />
+      </div>
+    )
+  }
+
+  const fadeDelay = Math.max(duration - FADE_WARN_MS, 0)
+  return (
+    <div className={`toast-progress-track toast-progress-track-${variant}`}>
+      <div
+        className={`toast-progress-bar toast-progress-${variant}`}
+        // Longhand properties, NOT the `animation` shorthand -- the
+        // shorthand implicitly sets animation-play-state too (default
+        // "running"), and an inline style always beats a class selector's
+        // animation-play-state regardless of its specificity, which is
+        // exactly what made :hover/:focus-within unable to pause this.
+        // Leaving animation-play-state out of the inline style entirely
+        // lets the CSS hover/focus rule control it normally.
+        style={{
+          animationName: 'toast-countdown, toast-countdown-fade',
+          animationDuration: `${duration}ms, ${FADE_WARN_MS}ms`,
+          animationTimingFunction: 'linear, linear',
+          animationDelay: `0ms, ${fadeDelay}ms`,
+          animationFillMode: 'forwards, forwards',
+        }}
+        onAnimationEnd={(e) => {
+          if (e.animationName === 'toast-countdown') onComplete()
+        }}
+      />
+    </div>
+  )
+}
+
 export default function DialogProvider({ children }) {
   const [confirmState, setConfirmState] = useState(null)
   const [alertState, setAlertState] = useState(null)
   const [toasts, setToasts] = useState([])
-  // Per-toast countdown state, keyed by toast id -- lets hover pause/resume
-  // the auto-dismiss timer without re-rendering the toast list on every tick.
-  const toastTimers = useRef(new Map())
   // Mirrors `toasts` for _toastHandler to read synchronously -- that handler
   // is assigned once in a []-deps effect below, so closing over `toasts`
   // directly would always see the initial empty array, never a later one.
@@ -123,7 +184,6 @@ export default function DialogProvider({ children }) {
   // in the JSX below actually re-renders when it changes).
   const [headerSlotEl, setHeaderSlotEl] = useState(null)
   const headerSlotElRef = useRef(null)
-  const [headerSlotWidth, setHeaderSlotWidth] = useState(0)
   const headerSlotWidthRef = useRef(0)
 
   useEffect(() => subscribeHeaderToastSlot((el) => {
@@ -134,13 +194,10 @@ export default function DialogProvider({ children }) {
   useEffect(() => {
     if (!headerSlotEl) {
       headerSlotWidthRef.current = 0
-      setHeaderSlotWidth(0)
-      return
+      return undefined
     }
     const ro = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect?.width ?? 0
-      headerSlotWidthRef.current = w
-      setHeaderSlotWidth(w)
+      headerSlotWidthRef.current = entries[0]?.contentRect?.width ?? 0
     })
     ro.observe(headerSlotEl)
     return () => ro.disconnect()
@@ -201,26 +258,18 @@ export default function DialogProvider({ children }) {
       setToasts((t) => {
         let next = [...t, toast]
         // The stack lane keeps its existing "max 3 visible, oldest dropped"
-        // cap. The dock lane is a true queue instead (only one toast is
-        // ever shown there at a time -- see the effect below -- so nothing
-        // needs to be evicted; it just waits its turn).
+        // cap. The dock lane is a true queue instead -- only the front ever
+        // renders (see dockToast below), so the rest just wait their turn,
+        // nothing to evict.
         if (lane === 'stack') {
           const stackItems = next.filter((x) => x.lane === 'stack' && !x.closing)
           if (stackItems.length > MAX_VISIBLE_STACK_TOASTS) {
             const evictIds = new Set(stackItems.slice(0, stackItems.length - MAX_VISIBLE_STACK_TOASTS).map((x) => x.id))
-            for (const evictId of evictIds) clearToastTimer(evictId)
             next = next.filter((x) => !evictIds.has(x.id))
           }
         }
         return next
       })
-
-      // Stack-lane toasts start their countdown immediately, same as
-      // before. Dock-lane toasts only start once they actually become the
-      // visible one -- see the queue-advance effect below -- so a toast
-      // waiting behind another doesn't silently burn through its own
-      // duration before anyone's seen it.
-      if (lane === 'stack') scheduleToastDismiss(id, duration)
     }
     return () => {
       _confirmHandler = null
@@ -228,18 +277,6 @@ export default function DialogProvider({ children }) {
       _toastHandler = null
     }
   }, [])
-
-  // Advances the dock queue: whenever the front dock-lane toast changes
-  // (a new one arrives with nothing ahead of it, or the previous front one
-  // finishes closing and is removed), start its timer if that hasn't
-  // happened yet. toastTimers already having an entry for it is the signal
-  // "already started" -- covers both cases without tracking a separate flag.
-  useEffect(() => {
-    const frontDock = toasts.find((t) => t.lane === 'dock' && !t.closing)
-    if (frontDock && !toastTimers.current.has(frontDock.id)) {
-      scheduleToastDismiss(frontDock.id, frontDock.duration)
-    }
-  }, [toasts])
 
   function closeConfirm(result) {
     confirmState?.resolve(result)
@@ -251,41 +288,22 @@ export default function DialogProvider({ children }) {
     setAlertState(null)
   }
 
-  function clearToastTimer(id) {
-    const timer = toastTimers.current.get(id)
-    if (timer?.timeoutId) clearTimeout(timer.timeoutId)
-    toastTimers.current.delete(id)
-  }
-
   // Two-phase removal: mark "closing" so the exit animation can play, then
-  // actually drop it from the array once that animation has had time to finish.
+  // actually drop it from the array once that animation has had time to
+  // finish. Idempotent -- the countdown bar's own animationend can still
+  // fire after a manual close (the bar doesn't stop just because React
+  // state changed), so a second call for an id that's already gone (or
+  // already closing) is a deliberate no-op rather than restarting the
+  // removal timer.
   function startClose(id) {
-    setToasts((t) => t.map((x) => (x.id === id ? { ...x, closing: true } : x)))
-    clearToastTimer(id)
+    setToasts((t) => {
+      const target = t.find((x) => x.id === id)
+      if (!target || target.closing) return t
+      return t.map((x) => (x.id === id ? { ...x, closing: true } : x))
+    })
     setTimeout(() => {
       setToasts((t) => t.filter((x) => x.id !== id))
     }, EXIT_DURATION_MS)
-  }
-
-  function scheduleToastDismiss(id, duration) {
-    const timeoutId = setTimeout(() => startClose(id), duration)
-    toastTimers.current.set(id, { timeoutId, remaining: duration, startedAt: Date.now() })
-  }
-
-  function pauseToast(id) {
-    const timer = toastTimers.current.get(id)
-    if (!timer || !timer.timeoutId) return
-    clearTimeout(timer.timeoutId)
-    timer.remaining -= Date.now() - timer.startedAt
-    timer.timeoutId = null
-  }
-
-  function resumeToast(id) {
-    const timer = toastTimers.current.get(id)
-    if (!timer || timer.timeoutId) return
-    const remaining = Math.max(timer.remaining, 0)
-    timer.timeoutId = setTimeout(() => startClose(id), remaining)
-    timer.startedAt = Date.now()
   }
 
   // Newest first (top of the stack), capped to the visible window -- the
@@ -295,7 +313,9 @@ export default function DialogProvider({ children }) {
   const stackToasts = toasts.filter((t) => t.lane === 'stack').slice(-MAX_VISIBLE_STACK_TOASTS).reverse()
   // Only the front of the dock queue renders -- including while it's
   // "closing" (mid exit-animation), so the fade-out actually plays instead
-  // of the next one popping in underneath it instantly.
+  // of the next one popping in underneath it instantly. Mounting IS
+  // starting, for the queue: the next toast's countdown bar (and therefore
+  // its timer) only begins once it actually becomes this front item.
   const dockToast = toasts.find((t) => t.lane === 'dock')
 
   return (
@@ -332,10 +352,6 @@ export default function DialogProvider({ children }) {
           <div
             className={`header-toast toast-${dockToast.variant}${dockToast.closing ? ' header-toast-closing' : ''}`}
             role={dockToast.variant === 'warning' || dockToast.variant === 'danger' ? 'alert' : 'status'}
-            onMouseEnter={() => pauseToast(dockToast.id)}
-            onMouseLeave={() => resumeToast(dockToast.id)}
-            onFocus={() => pauseToast(dockToast.id)}
-            onBlur={() => resumeToast(dockToast.id)}
           >
             <div className="header-toast-row">
               {dockToast.avatarUrl ? (
@@ -345,7 +361,10 @@ export default function DialogProvider({ children }) {
                   <ToastVariantIcon variant={dockToast.variant} />
                 </span>
               )}
-              <span className="header-toast-text">
+              <span
+                className="header-toast-text"
+                title={[dockToast.title, dockToast.message].filter(Boolean).join(' · ')}
+              >
                 {dockToast.title && <strong>{dockToast.title}</strong>}
                 {dockToast.title && dockToast.message && <span className="header-toast-text-sep"> &middot; </span>}
                 {dockToast.message && <span className="header-toast-message">{dockToast.message}</span>}
@@ -368,12 +387,12 @@ export default function DialogProvider({ children }) {
                 </button>
               </div>
             </div>
-            <div className="toast-progress-track">
-              <div
-                className={`toast-progress-bar toast-progress-${dockToast.variant}`}
-                style={{ animationDuration: `${dockToast.duration}ms` }}
-              />
-            </div>
+            <ToastProgressBar
+              id={dockToast.id}
+              variant={dockToast.variant}
+              duration={dockToast.duration}
+              onComplete={() => startClose(dockToast.id)}
+            />
           </div>,
           headerSlotEl
         )}
@@ -385,10 +404,6 @@ export default function DialogProvider({ children }) {
               key={t.id}
               className={`toast toast-${t.variant}${t.closing ? ' toast-closing' : ''}`}
               role={t.variant === 'warning' || t.variant === 'danger' ? 'alert' : 'status'}
-              onMouseEnter={() => pauseToast(t.id)}
-              onMouseLeave={() => resumeToast(t.id)}
-              onFocus={() => pauseToast(t.id)}
-              onBlur={() => resumeToast(t.id)}
             >
               <div className="toast-row">
                 {t.avatarUrl ? (
@@ -420,12 +435,7 @@ export default function DialogProvider({ children }) {
                   </button>
                 </div>
               </div>
-              <div className="toast-progress-track">
-                <div
-                  className={`toast-progress-bar toast-progress-${t.variant}`}
-                  style={{ animationDuration: `${t.duration}ms` }}
-                />
-              </div>
+              <ToastProgressBar id={t.id} variant={t.variant} duration={t.duration} onComplete={() => startClose(t.id)} />
             </div>
           ))}
         </div>,

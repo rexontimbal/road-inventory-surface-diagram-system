@@ -337,7 +337,8 @@ export default function RoadInventoryTable({
       onSegmentEdited?.(original.section_id)
       showToast({
         variant: 'success',
-        message: `${original.section_id} segment updated (${original.start_station}–${original.end_station})`,
+        title: 'Saved',
+        message: `${original.section_id} updated · ${original.start_station} → ${original.end_station}`,
         actionLabel: 'Undo',
         duration: 8000,
         onAction: async () => {

@@ -3766,6 +3766,7 @@ tbody tr:hover .row-edit-btn,
   width: min(480px, calc(100% - 32px));
 }
 .toast {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -3804,7 +3805,7 @@ tbody tr:hover .row-edit-btn,
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 12px 16px;
+  padding: 12px 16px 15px;
 }
 .toast-icon {
   flex-shrink: 0;
@@ -3892,23 +3893,47 @@ tbody tr:hover .row-edit-btn,
   background: none;
   color: #334155;
 }
+/* Absolutely positioned along the card's own bottom edge (not normal flow)
+   so it's a thin line flush with the bottom border, clipped to the card's
+   rounded corners by the card's own overflow:hidden -- not reserving its
+   own row of layout space the way a block-flow bar would. The TRACK is a
+   static faint tint of the variant color; the BAR sits on top of it (same
+   containing block, since position:absolute itself still establishes one
+   for its own children) and shrinks via scaleX, revealing more of the
+   track as time passes. */
 .toast-progress-track {
-  height: 2px;
-  background: transparent;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+}
+.toast-progress-track-success {
+  background: rgba(34, 197, 94, 0.15);
+}
+.toast-progress-track-info {
+  background: rgba(37, 99, 235, 0.15);
+}
+.toast-progress-track-warning {
+  background: rgba(217, 119, 6, 0.15);
+}
+.toast-progress-track-danger {
+  background: rgba(220, 38, 38, 0.15);
 }
 .toast-progress-bar {
-  height: 100%;
-  width: 100%;
+  position: absolute;
+  inset: 0;
   transform-origin: left;
-  animation-name: toast-progress-countdown;
   animation-timing-function: linear;
   animation-fill-mode: forwards;
 }
 .toast:hover .toast-progress-bar,
-.toast:focus-within .toast-progress-bar {
+.toast:focus-within .toast-progress-bar,
+.header-toast:hover .toast-progress-bar,
+.header-toast:focus-within .toast-progress-bar {
   animation-play-state: paused;
 }
-@keyframes toast-progress-countdown {
+@keyframes toast-countdown {
   from {
     transform: scaleX(1);
   }
@@ -3916,17 +3941,34 @@ tbody tr:hover .row-edit-btn,
     transform: scaleX(0);
   }
 }
+/* The "about to close" cue (point 5) -- a fixed 1s fade timed via
+   animation-delay (see ToastProgressBar's inline style) rather than a
+   keyframe percentage, so it lands on the last second of EITHER a 4s or
+   an 8s toast without needing a different keyframe per duration. */
+@keyframes toast-countdown-fade {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.6;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast-progress-bar {
+    animation: none !important;
+  }
+}
 .toast-progress-success {
-  background: #16a34a;
+  background: linear-gradient(90deg, #22c55e, #16a34a);
 }
 .toast-progress-info {
-  background: #2563eb;
+  background: linear-gradient(90deg, #3b82f6, #2563eb);
 }
 .toast-progress-warning {
-  background: #d97706;
+  background: linear-gradient(90deg, #f59e0b, #d97706);
 }
 .toast-progress-danger {
-  background: #dc2626;
+  background: linear-gradient(90deg, #ef4444, #dc2626);
 }
 @media (max-width: 640px) {
   .toast-stack {
@@ -3944,6 +3986,7 @@ tbody tr:hover .row-edit-btn,
    top-center stack otherwise, including the whole time the diagram is
    fullscreen, where the header doesn't exist at all). */
 .header-toast {
+  position: relative;
   box-sizing: border-box;
   width: 100%;
   max-width: 440px;
@@ -3982,7 +4025,7 @@ tbody tr:hover .row-edit-btn,
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 6px 10px 9px;
 }
 .header-toast-icon {
   flex-shrink: 0;
@@ -4023,9 +4066,6 @@ tbody tr:hover .row-edit-btn,
   display: flex;
   align-items: center;
   gap: 8px;
-}
-.header-toast .toast-progress-track {
-  height: 2px;
 }
 
 /* ===== Fullscreen Road Surface Diagram ===== */
