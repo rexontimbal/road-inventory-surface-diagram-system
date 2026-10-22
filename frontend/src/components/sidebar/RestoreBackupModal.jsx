@@ -9,13 +9,34 @@ function formatDateTime(iso) {
   return d.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
 }
 
+function n(count) {
+  return count.toLocaleString()
+}
+
+// backup.roads carries each section's own total_length_m -- the preview
+// response itself only has counts (roads/segments/logs), so the km figure
+// shown in this modal is derived client-side from the full parsed backup
+// file already sitting in memory, not from a backend field.
+function backupTotalKm(backup) {
+  if (!backup?.roads) return null
+  const totalM = backup.roads.reduce((sum, r) => sum + (r.total_length_m || 0), 0)
+  return (totalM / 1000).toFixed(1)
+}
+
 /**
  * Shown after a backup .json file has been picked and previewed against
  * the backend. Nothing is applied until Continue -- the user first picks
- * Replace all vs Merge, then (for Merge, if there are Road-ID conflicts)
- * the same per-road Replace/Keep choice as a normal upload conflict.
+ * Replace all vs Merge, then (for Merge, if there are Section-ID conflicts)
+ * the same per-section Replace/Keep choice as a normal upload conflict.
+ *
+ * When the active workspace is already empty there's nothing to merge or
+ * replace -- conflicts are impossible -- so a single "Restore backup?"
+ * confirmation replaces the Merge/Replace-all choice and goes straight to
+ * a full restore (mode 'merge' with no decisions behaves identically to
+ * 'replace_all' when nothing existing can conflict).
  */
-export default function RestoreBackupModal({ preview, onCancel, onContinue }) {
+export default function RestoreBackupModal({ preview, backup, onCancel, onContinue }) {
+  const isEmptyWorkspace = preview.current_counts.roads === 0
   const [mode, setMode] = useState('merge')
   const [decisions, setDecisions] = useState(() =>
     Object.fromEntries(preview.duplicates.map((d) => [d.section_id, 'keep']))
@@ -49,9 +70,64 @@ export default function RestoreBackupModal({ preview, onCancel, onContinue }) {
     setDecisions(Object.fromEntries(preview.duplicates.map((d) => [d.section_id, value])))
   }
 
-  const showDuplicates = mode === 'merge' && preview.duplicates.length > 0
+  const showDuplicates = !isEmptyWorkspace && mode === 'merge' && preview.duplicates.length > 0
+  const km = backupTotalKm(backup)
 
   if (zIndex == null) return null
+
+  if (isEmptyWorkspace) {
+    const sections = preview.backup_counts.roads
+    const segments = preview.backup_counts.segments
+    return createPortal(
+      <div
+        className="modal-backdrop no-print"
+        style={{ zIndex }}
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget) onCancel()
+        }}
+      >
+        <div
+          className="modal-card restore-modal-card"
+          ref={cardRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="restore-modal-title"
+        >
+          <div className="modal-header">
+            <div className="modal-icon modal-icon-info" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M12 8v4l3 2M4.6 9A8 8 0 1 1 4 13"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path d="M4 5v4h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <h3 id="restore-modal-title" className="modal-title">
+              Restore backup?
+            </h3>
+          </div>
+          <p className="modal-message">
+            Backup from {formatDateTime(preview.backup_exported_at)} · {n(sections)} section{sections !== 1 ? 's' : ''} ·{' '}
+            {n(segments)} segment{segments !== 1 ? 's' : ''}
+            {km != null ? ` · ${km} km` : ''}. Your workspace is currently empty.
+          </p>
+          <div className="modal-actions">
+            <button type="button" className="modal-btn modal-btn-cancel" onClick={onCancel}>
+              Cancel
+            </button>
+            <button type="button" className="modal-btn modal-btn-confirm" onClick={() => onContinue('merge', {})}>
+              Restore
+            </button>
+          </div>
+        </div>
+      </div>,
+      getFullscreenPortalRoot()
+    )
+  }
 
   return createPortal(
     <div
@@ -86,10 +162,10 @@ export default function RestoreBackupModal({ preview, onCancel, onContinue }) {
           </h3>
         </div>
         <p className="modal-message">
-          Backup from {formatDateTime(preview.backup_exported_at)} — {preview.backup_counts.roads} road
-          {preview.backup_counts.roads !== 1 ? 's' : ''}, {preview.backup_counts.segments} segments. Currently in the
-          system: {preview.current_counts.roads} road{preview.current_counts.roads !== 1 ? 's' : ''},{' '}
-          {preview.current_counts.segments} segments.
+          Backup from {formatDateTime(preview.backup_exported_at)} · {n(preview.backup_counts.roads)} section
+          {preview.backup_counts.roads !== 1 ? 's' : ''} · {n(preview.backup_counts.segments)} segments
+          {km != null ? ` · ${km} km` : ''}. Currently in the workspace: {n(preview.current_counts.roads)} section
+          {preview.current_counts.roads !== 1 ? 's' : ''} · {n(preview.current_counts.segments)} segments.
         </p>
 
         <div className="restore-mode-row">
@@ -99,7 +175,7 @@ export default function RestoreBackupModal({ preview, onCancel, onContinue }) {
             onClick={() => setMode('merge')}
           >
             <strong>Merge</strong>
-            <span>Add backup roads; choose what to do with Section IDs that already exist.</span>
+            <span>Add backup sections; choose what to do with Section IDs that already exist.</span>
           </button>
           <button
             type="button"

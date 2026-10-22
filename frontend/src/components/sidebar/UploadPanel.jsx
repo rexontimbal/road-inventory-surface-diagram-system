@@ -204,7 +204,7 @@ const UploadPanel = forwardRef(function UploadPanel(
       const backup = await downloadBackupFile()
       showToast({
         variant: 'success',
-        message: `Backup saved (${backup.counts.roads} road${backup.counts.roads !== 1 ? 's' : ''}, ${backup.counts.segments.toLocaleString()} segments)`,
+        message: `Backup saved (${backup.counts.roads.toLocaleString()} section${backup.counts.roads !== 1 ? 's' : ''}, ${backup.counts.segments.toLocaleString()} segments)`,
       })
     } catch (err) {
       showToast({ variant: 'danger', message: `Backup failed: ${err.message}` })
@@ -255,7 +255,7 @@ const UploadPanel = forwardRef(function UploadPanel(
         throw new Error('This file is not a Road Inventory & Surface Diagram backup.')
       }
       const preview = await previewRestore(backup)
-      setPendingRestore({ preview })
+      setPendingRestore({ preview, backup })
     } catch (err) {
       await showAlert({ title: 'Could not read backup file', message: err.message, variant: 'danger' })
     } finally {
@@ -273,10 +273,11 @@ const UploadPanel = forwardRef(function UploadPanel(
       setPendingRestore(null)
       onRestored()
       checkUnreadLog()
-      const parts = [`${res.added} added`]
-      if (res.replaced > 0) parts.push(`${res.replaced} replaced`)
-      if (res.kept > 0) parts.push(`${res.kept} kept`)
-      showToast({ variant: 'success', message: `Restore complete: ${parts.join(', ')}` })
+      const total = res.total_roads
+      showToast({
+        variant: 'success',
+        message: `Backup restored · ${total.toLocaleString()} section${total !== 1 ? 's' : ''}`,
+      })
     } catch (err) {
       showToast({ variant: 'danger', message: `Restore failed: ${err.message}` })
     }
@@ -573,6 +574,7 @@ const UploadPanel = forwardRef(function UploadPanel(
       {pendingRestore && (
         <RestoreBackupModal
           preview={pendingRestore.preview}
+          backup={pendingRestore.backup}
           onCancel={handleRestoreCancel}
           onContinue={handleRestoreContinue}
         />
