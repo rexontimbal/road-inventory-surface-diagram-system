@@ -26,6 +26,11 @@ export default function CustomSelect({
   getSearchText,
   triggerClassName = '',
   ariaLabel,
+  // Panel's own max-width, independent of the trigger's -- most callers are
+  // fine with the 280px default (short labels), but a caller with long,
+  // information-dense option text (e.g. a district name + stats) can ask
+  // for more room without every other CustomSelect in the app getting wider.
+  panelWidth = 280,
 }) {
   const instanceId = useId()
   const [open, setOpen] = useState(false)
@@ -126,7 +131,11 @@ export default function CustomSelect({
     const estimatedHeight = (searchable ? 44 : 0) + 260 + 16
     const spaceBelow = window.innerHeight - rect.bottom
     const flip = spaceBelow < estimatedHeight && rect.top > estimatedHeight
-    const maxWidth = 280
+    // Never lets the panel request more than the viewport can actually give
+    // it (minus the same 8px edge margin `left` is clamped to below) --
+    // panelWidth is a ceiling, not a guarantee, so a narrow phone screen
+    // still gets a fully on-screen panel instead of one clipped at the edge.
+    const maxWidth = Math.min(panelWidth, window.innerWidth - 16)
     const left = Math.min(rect.left, window.innerWidth - maxWidth - 8)
     setPlacement({
       left: Math.max(8, left),

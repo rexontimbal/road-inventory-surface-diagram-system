@@ -143,14 +143,32 @@ export default function DeleteAllDataModal({ onCancel, onConfirm, deleting }) {
 
             {scope === 'district' && (
               <CustomSelect
-                size="sm"
+                size="md"
                 value={district}
                 onChange={setDistrict}
                 ariaLabel="District to delete"
+                triggerClassName="delete-all-district-trigger"
+                // The trigger only ever shows the plain district name (full
+                // name truncates with an ellipsis if it's long, with the
+                // untruncated name in a native tooltip -- CustomSelect
+                // already sets title={selected.label}); counts live in the
+                // summary box above instead of being crammed in here too.
                 options={preview.districts.map((d) => ({
                   value: d.deo,
-                  label: `${d.deo} — ${formatStat(d.sections, d.segments, d.total_length_m)}`,
+                  label: d.deo,
+                  stat: formatStat(d.sections, d.segments, d.total_length_m),
                 }))}
+                getSearchText={(o) => `${o.label} ${o.stat}`}
+                // Wider than the 280px default -- a district name plus its
+                // stat line needs more room to stay readable, clamped to
+                // the viewport regardless (see CustomSelect's own panelWidth).
+                panelWidth={380}
+                renderOption={(o) => (
+                  <div className="delete-all-district-option">
+                    <span className="delete-all-district-option-name">{o.label}</span>
+                    <span className="delete-all-district-option-stat">{o.stat}</span>
+                  </div>
+                )}
               />
             )}
 
@@ -163,9 +181,12 @@ export default function DeleteAllDataModal({ onCancel, onConfirm, deleting }) {
               Download a backup first
             </label>
 
-            <label className="delete-all-confirm-row">
-              Type <strong>{CONFIRM_WORD}</strong> to confirm
+            <div className="delete-all-confirm-row">
+              <label htmlFor="delete-all-confirm-input" className="delete-all-confirm-label">
+                Type <strong>{CONFIRM_WORD}</strong> to confirm
+              </label>
               <input
+                id="delete-all-confirm-input"
                 type="text"
                 className="delete-all-confirm-input"
                 value={confirmText}
@@ -175,7 +196,7 @@ export default function DeleteAllDataModal({ onCancel, onConfirm, deleting }) {
                 spellCheck={false}
                 placeholder={CONFIRM_WORD}
               />
-            </label>
+            </div>
           </>
         )}
 

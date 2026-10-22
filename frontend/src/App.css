@@ -3095,12 +3095,18 @@ tbody tr:hover .row-edit-btn,
   background: var(--critical-soft);
 }
 
-/* ===== Delete-all-data modal ===== */
+/* ===== Delete-all-data modal =====
+   Consistent 14-16px vertical rhythm between blocks, 20px above the footer,
+   20-24px inner padding on every side (inherited from the shared
+   .modal-card rule -- not overridden here), width capped so nothing inside
+   can ever force horizontal overflow regardless of district name length. */
 .delete-all-modal-card {
-  max-width: 440px;
+  width: 100%;
+  max-width: 480px;
+  box-sizing: border-box;
 }
 .delete-all-summary {
-  margin: 0 0 14px;
+  margin: 0 0 16px;
   padding: 10px 12px;
   border-radius: 8px;
   background: var(--surface-sunken);
@@ -3108,12 +3114,13 @@ tbody tr:hover .row-edit-btn,
   font-weight: 600;
   color: var(--text-primary);
   text-align: center;
+  box-sizing: border-box;
 }
 .delete-all-scope-options {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 .delete-all-scope-option {
   display: flex;
@@ -3124,41 +3131,81 @@ tbody tr:hover .row-edit-btn,
   cursor: pointer;
 }
 .delete-all-scope-option input[type='radio'] {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
+  margin: 0;
   accent-color: var(--accent);
   flex-shrink: 0;
+}
+/* The district picker sits right under its radio, same 14px rhythm as
+   every other block -- CustomSelect's own trigger otherwise sizes itself
+   to its label's content (inline-flex, no width), which is exactly what
+   let a long district name push past the modal's edge. */
+.delete-all-district-trigger {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  font-size: 13.5px;
+  margin-bottom: 14px;
+}
+.delete-all-district-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 2px 0;
+}
+.delete-all-district-option-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.delete-all-district-option-stat {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .delete-all-checkbox-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 14px 0 16px;
+  margin: 0 0 16px;
   font-size: 13.5px;
   color: var(--text-primary);
   cursor: pointer;
 }
 .delete-all-checkbox-row input[type='checkbox'] {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
+  margin: 0;
   accent-color: var(--accent);
   flex-shrink: 0;
 }
 .delete-all-confirm-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 4px;
+  margin-bottom: 20px;
+}
+.delete-all-confirm-label {
+  display: block;
+  margin-bottom: 6px;
   font-size: 12.5px;
   color: var(--text-secondary);
+  white-space: nowrap;
 }
-.delete-all-confirm-row strong {
+.delete-all-confirm-label strong {
   color: var(--critical);
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
   letter-spacing: 0.03em;
 }
 .delete-all-confirm-input {
+  width: 100%;
   height: 38px;
   padding: 0 12px;
+  box-sizing: border-box;
   border: 1.5px solid #cbd5e1;
   border-radius: 8px;
   font-size: 14px;
@@ -3169,6 +3216,9 @@ tbody tr:hover .row-edit-btn,
   border-color: var(--critical);
   outline: none;
   box-shadow: 0 0 0 3px var(--critical-soft);
+}
+.delete-all-modal-card .modal-actions {
+  gap: 8px;
 }
 .restore-mode-card-danger.restore-mode-card-active:hover {
   border-color: #dc2626;
