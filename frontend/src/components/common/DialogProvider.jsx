@@ -34,11 +34,10 @@ export function showAlert(options) {
  * line under the (now-required-looking) title. `avatarUrl` swaps the
  * variant icon for a round avatar (used for share notifications).
  *
- * Renders docked inside the header's own free space (between the title and
- * the right-side buttons) when there's room for it and the diagram isn't
- * fullscreen; otherwise falls back to the centered stack below the header
- * (also always used inside fullscreen, which has no header at all). That
- * choice is made once, when the toast is created.
+ * Renders docked inside the header (centered on the viewport, overlapping
+ * the title/chips if it must) whenever the diagram isn't fullscreen; the
+ * centered top stack is used only inside fullscreen, which has no header
+ * at all. That choice is made once, when the toast is created.
  */
 export function showToast(options) {
   if (_toastHandler) _toastHandler(options)
@@ -60,9 +59,6 @@ const DEFAULT_DURATIONS = {
 
 const MAX_VISIBLE_STACK_TOASTS = 3
 const EXIT_DURATION_MS = 180
-// Below this, the header's free space is too cramped for even the compact
-// one-line card -- falls back to the normal centered stack instead.
-const HEADER_SLOT_MIN_PX = 280
 // The countdown bar fades (opacity 1 -> 0.6) over exactly this long, ending
 // right as the bar itself finishes -- a fixed-length fade timed via
 // animation-delay rather than a keyframe percentage, so it reads as "last
@@ -184,24 +180,11 @@ export default function DialogProvider({ children }) {
   // in the JSX below actually re-renders when it changes).
   const [headerSlotEl, setHeaderSlotEl] = useState(null)
   const headerSlotElRef = useRef(null)
-  const headerSlotWidthRef = useRef(0)
 
   useEffect(() => subscribeHeaderToastSlot((el) => {
     headerSlotElRef.current = el
     setHeaderSlotEl(el)
   }), [])
-
-  useEffect(() => {
-    if (!headerSlotEl) {
-      headerSlotWidthRef.current = 0
-      return undefined
-    }
-    const ro = new ResizeObserver((entries) => {
-      headerSlotWidthRef.current = entries[0]?.contentRect?.width ?? 0
-    })
-    ro.observe(headerSlotEl)
-    return () => ro.disconnect()
-  }, [headerSlotEl])
 
   // Re-renders on every fullscreen enter/exit so the toast portal below
   // (which otherwise might not re-render around that exact moment) always
@@ -227,8 +210,11 @@ export default function DialogProvider({ children }) {
     _toastHandler = (opts) => {
       const variant = opts.variant ?? 'info'
       const isFullscreenNow = !!(document.fullscreenElement || document.webkitFullscreenElement)
-      const lane =
-        !isFullscreenNow && headerSlotElRef.current && headerSlotWidthRef.current >= HEADER_SLOT_MIN_PX ? 'dock' : 'stack'
+      // Always docked in the header outside of fullscreen, at every screen
+      // width -- the header-not-mounted-yet fallback to 'stack' is a defensive
+      // edge case (toasts fired before Header's registerHeaderToastSlot has
+      // run), not a width-based decision anymore.
+      const lane = !isFullscreenNow && headerSlotElRef.current ? 'dock' : 'stack'
 
       // Dedupe against whatever's already pending IN THE SAME LANE -- a
       // caller that fires the same failure 2-3 times in a row (a double-

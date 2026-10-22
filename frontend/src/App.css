@@ -233,23 +233,25 @@
   font-size: 12.5px;
   color: #94a3b8;
 }
-/* Takes exactly whatever's left between .app-header-brand (which can
-   shrink its own title via ellipsis) and .app-header-right (flex-shrink:0,
-   never shrinks) -- the toast portaled inside is centered within it by
-   plain flexbox, no manual position math needed. min-width:0 is required
-   for a flex child to actually shrink below its content size instead of
-   overflowing; overflow:hidden on a header with its own clipped background
-   pattern (see .app-header::after above) means an unexpectedly-wide toast
-   would clip rather than spill out, acting as a hard safety net on top of
-   the deliberate max-width on .header-toast itself. */
+/* Taken OUT of the brand/right-group flex flow entirely (position:absolute)
+   and centered on .app-header-inner's own box instead of whatever free
+   space happens to be left between them -- .app-header-inner is itself
+   centered on the viewport (margin:0 auto inside the full-width
+   .app-header), so centering on it is centering on the viewport at every
+   width, not just when there's enough free space. May visually overlap the
+   title/chips on narrow screens (accepted); pointer-events:none here (with
+   :auto restored on the toast card itself below) so that overlap never
+   blocks clicks on whatever header control happens to sit underneath. */
 .app-header-toast-slot {
-  flex: 1 1 auto;
-  min-width: 0;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+  pointer-events: none;
+}
+.app-header-toast-slot > * {
+  pointer-events: auto;
 }
 .app-header-right {
   flex-shrink: 0;
@@ -1778,6 +1780,17 @@ button:focus-visible {
      math alone left room for it. min-width:0 lets ellipsis/overflow:hidden
      actually govern the true minimum, like it's meant to. */
   min-width: 0;
+}
+/* Above ~1100px (.filter-more-fields is display:contents there -- see the
+   min-width:1101px block below), Number of Lanes becomes a normal flex item
+   of .filter-bar alongside the rest. When it's the lone item wrapped onto
+   the row below the others, the base rule's flex-grow:1 stretches it to
+   fill that entire row by itself instead of staying the same width as its
+   siblings -- pinning flex-grow to 0 here (after the base rule, so it wins
+   on source order at equal specificity) keeps it at its flex-basis width
+   like every other filter field, growing only via that shared basis. */
+.filter-bar .filter-field-lanes {
+  flex-grow: 0;
 }
 /* Scoped as ".filter-bar .filter-field" (two classes) rather than bare
    ".filter-field" (one class) so this reliably outranks the sidebar's global
@@ -4213,27 +4226,19 @@ tbody tr:hover .row-edit-btn,
 .toast-progress-danger {
   background: linear-gradient(90deg, #ef4444, #dc2626);
 }
-@media (max-width: 640px) {
-  .toast-stack {
-    top: 72px;
-  }
-}
-
 /* ===== Header-docked toast =====
-   Rendered INSIDE .app-header-toast-slot (a real flex child between the
-   title and the right-side button group -- see Header.jsx/App.css above),
-   so centering and "never overlaps the title/chips/Share/avatar" are both
-   just plain flex layout, not manual position math. Compact single-line
-   variant of the same white-card design as .toast-stack; only used while
-   that slot actually has room (DialogProvider falls back to the normal
-   top-center stack otherwise, including the whole time the diagram is
-   fullscreen, where the header doesn't exist at all). */
+   Rendered INSIDE .app-header-toast-slot (see App.css above) -- the ONLY
+   toast presentation outside of fullscreen, at every screen width, always
+   centered on the viewport and vertically centered in the (constant-height)
+   header. Compact single-line variant of the same white-card design as
+   .toast-stack; the centered top stack is used only inside fullscreen,
+   which has no header at all. Width follows the viewport, not the header's
+   free space, so it stays legible down to very narrow screens without
+   ever needing to fall back to a second layout. */
 .header-toast {
   position: relative;
   box-sizing: border-box;
-  width: 100%;
-  max-width: 440px;
-  min-width: 0;
+  width: min(440px, calc(100vw - 32px));
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
