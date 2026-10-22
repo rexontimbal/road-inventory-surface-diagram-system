@@ -1273,6 +1273,98 @@ button:focus-visible {
   gap: 5px;
 }
 
+/* ===== Header "Share" button -- premium pill, distinct from .btn-compact's
+   plain-white look so it stands out against the dark header the way an
+   invite-to-collaborate action should. Declared after .btn-compact (same
+   0-1-0 selector specificity each) so its own background/padding/etc. win
+   for every property they both set, without needing !important. */
+.header-share-btn {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 4px 14px rgba(37, 99, 235, 0.35);
+  transition: background 150ms ease, box-shadow 150ms ease, transform 150ms ease, border-color 150ms ease;
+}
+.header-share-btn svg {
+  flex-shrink: 0;
+}
+.header-share-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #4f8cf7, #3b82f6);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24), 0 6px 18px rgba(37, 99, 235, 0.45);
+  transform: translateY(-1px);
+  color: #ffffff;
+}
+.header-share-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 2px 8px rgba(37, 99, 235, 0.3);
+}
+.header-share-btn:focus-visible {
+  outline: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 4px 14px rgba(37, 99, 235, 0.35), 0 0 0 2px #ffffff;
+}
+/* Subtle outline, not the solid gray every other disabled button gets --
+   this one lives on a dark header, and a light-gray fill would look like a
+   rendering glitch rather than a deliberate "not allowed here" state.
+   Specificity (0,2,0) beats the global button:disabled rule (0,1,1), so
+   this applies regardless of source order. */
+.header-share-btn:disabled {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.55);
+  box-shadow: none;
+  cursor: not-allowed;
+  transform: none;
+}
+.header-share-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  padding: 1px 6px;
+  line-height: 1.4;
+}
+.header-share-dot {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .header-share-btn {
+    transition: none;
+  }
+  .header-share-btn:hover:not(:disabled) {
+    transform: none;
+  }
+}
+/* Icon-only below 1024px -- the count becomes a small dot badge instead of
+   the "· N" pill, same reasoning as the avatar's own notification dot. */
+@media (max-width: 1024px) {
+  .header-share-btn {
+    padding: 0 8px;
+  }
+  .header-share-label,
+  .header-share-count {
+    display: none;
+  }
+  .header-share-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #ffffff;
+    box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.6);
+  }
+}
+
 .btn-icon-32 {
   width: 32px;
   height: 32px;
@@ -1448,6 +1540,31 @@ button:focus-visible {
 }
 .backup-actions .btn-compact {
   flex: 1;
+}
+
+.delete-all-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+  padding: 0;
+  background: none;
+  border: none;
+  height: auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--critical);
+}
+.delete-all-trigger:hover:not(:disabled) {
+  background: none;
+  color: #b91c1c;
+  text-decoration: underline;
+}
+.delete-all-trigger:disabled {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: not-allowed;
 }
 
 .required-columns {
@@ -2976,6 +3093,82 @@ tbody tr:hover .row-edit-btn,
 .restore-mode-card-danger.restore-mode-card-active {
   border-color: #dc2626;
   background: var(--critical-soft);
+}
+
+/* ===== Delete-all-data modal ===== */
+.delete-all-modal-card {
+  max-width: 440px;
+}
+.delete-all-summary {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface-sunken);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: center;
+}
+.delete-all-scope-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.delete-all-scope-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.delete-all-scope-option input[type='radio'] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+.delete-all-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 16px;
+  font-size: 13.5px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.delete-all-checkbox-row input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+.delete-all-confirm-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.delete-all-confirm-row strong {
+  color: var(--critical);
+  letter-spacing: 0.03em;
+}
+.delete-all-confirm-input {
+  height: 38px;
+  padding: 0 12px;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
+}
+.delete-all-confirm-input:focus {
+  border-color: var(--critical);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--critical-soft);
 }
 .restore-mode-card-danger.restore-mode-card-active:hover {
   border-color: #dc2626;

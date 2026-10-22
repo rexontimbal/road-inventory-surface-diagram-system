@@ -1,11 +1,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
-import { cancelUpload, commitUpload, fetchUploadLog, previewUpload } from '../../api/roads'
+import { cancelUpload, commitUpload, deleteAllRoads, fetchUploadLog, previewUpload } from '../../api/roads'
 import { commitRestore, exportBackup, previewRestore } from '../../api/backup'
 import { showAlert, showToast } from '../common/DialogProvider'
 import { readLastSeenLogId } from '../../utils/uploadLogSeen'
 import UploadConflictModal from './UploadConflictModal'
 import UploadHistoryModal from './UploadHistoryModal'
 import RestoreBackupModal from './RestoreBackupModal'
+import DeleteAllDataModal from './DeleteAllDataModal'
 
 const REQUIRED_COLUMNS_AUTO_HIDE_MS = 10000
 
@@ -73,15 +74,21 @@ function buildUploadToast(res) {
 }
 
 const UploadPanel = forwardRef(function UploadPanel(
-  { onUploaded, onRestored, roads, uploadMeta, onExpand, canEdit = true, workspaceContext },
+  { onUploaded, onRestored, onDeletedAll, roads, uploadMeta, onExpand, canEdit = true, workspaceContext },
   ref
 ) {
+  // Same "own this workspace?" check Clear History/Share use -- defaults
+  // to true before workspaceContext has loaded, matching every other
+  // canEdit-style check in the app.
+  const isOwner = !workspaceContext || workspaceContext.role === 'owner'
   const fileInputRef = useRef(null)
   const restoreInputRef = useRef(null)
   const [fileName, setFileName] = useState('')
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
   const [backingUp, setBackingUp] = useState(false)
+  const [deleteAllModalOpen, setDeleteAllModalOpen] = useState(false)
+  const [deletingAll, setDeletingAll] = useState(false)
   const [pendingRestore, setPendingRestore] = useState(null)
   const persistRequestedRef = useRef(false)
   // Set only when the preview finds Road-ID conflicts -- holds the preview
@@ -171,20 +178,30 @@ const UploadPanel = forwardRef(function UploadPanel(
     }
   }
 
+  // Shared by the explicit "Backup data" button and Delete All Data's
+  // "Download a backup first" checkbox -- the button toasts on its own
+  // ("Backup saved..."), but the delete flow folds the outcome into its
+  // own single combined toast instead of stacking two, so the actual
+  // download+file-naming logic lives here with no toast of its own.
+  async function downloadBackupFile() {
+    const backup = await exportBackup()
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
+    const now = new Date()
+    const pad = (n) => String(n).padStart(2, '0')
+    const filename = `road-inventory-backup_${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.json`
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+    return backup
+  }
+
   async function handleBackup() {
     setBackingUp(true)
     try {
-      const backup = await exportBackup()
-      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
-      const now = new Date()
-      const pad = (n) => String(n).padStart(2, '0')
-      const filename = `road-inventory-backup_${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.json`
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = filename
-      a.click()
-      URL.revokeObjectURL(url)
+      const backup = await downloadBackupFile()
       showToast({
         variant: 'success',
         message: `Backup saved (${backup.counts.roads} road${backup.counts.roads !== 1 ? 's' : ''}, ${backup.counts.segments.toLocaleString()} segments)`,
@@ -193,6 +210,33 @@ const UploadPanel = forwardRef(function UploadPanel(
       showToast({ variant: 'danger', message: `Backup failed: ${err.message}` })
     } finally {
       setBackingUp(false)
+    }
+  }
+
+  async function handleConfirmDeleteAll({ district, downloadBackupFirst }) {
+    setDeletingAll(true)
+    try {
+      if (downloadBackupFirst) {
+        try {
+          await downloadBackupFile()
+        } catch (err) {
+          showToast({ variant: 'danger', message: `Backup failed, nothing was deleted: ${err.message}` })
+          return
+        }
+      }
+      const result = await deleteAllRoads(district)
+      setDeleteAllModalOpen(false)
+      await onDeletedAll?.()
+      const count = result.deleted_sections
+      const backupSuffix = downloadBackupFirst ? ' Backup downloaded.' : ''
+      const message = district
+        ? `${count} section${count !== 1 ? 's' : ''} deleted from ${district}.${backupSuffix}`
+        : `All road data deleted (${count} section${count !== 1 ? 's' : ''}).${backupSuffix}`
+      showToast({ variant: 'success', message })
+    } catch (err) {
+      showToast({ variant: 'danger', message: `Could not delete: ${err.message}` })
+    } finally {
+      setDeletingAll(false)
     }
   }
 
@@ -416,6 +460,36 @@ const UploadPanel = forwardRef(function UploadPanel(
           onChange={handleRestoreFileChange}
         />
       </div>
+
+      {roads && roads.length > 0 && (
+        <button
+          type="button"
+          className="delete-all-trigger"
+          onClick={() => setDeleteAllModalOpen(true)}
+          disabled={!isOwner}
+          title={isOwner ? undefined : 'Only the owner can delete all data.'}
+          aria-label={isOwner ? 'Delete all data' : 'Only the owner can delete all data.'}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13M10 11v6M14 11v6"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          Delete all data…
+        </button>
+      )}
+
+      {deleteAllModalOpen && (
+        <DeleteAllDataModal
+          deleting={deletingAll}
+          onCancel={() => setDeleteAllModalOpen(false)}
+          onConfirm={handleConfirmDeleteAll}
+        />
+      )}
 
       {error && (
         <div className="feedback-card feedback-critical">

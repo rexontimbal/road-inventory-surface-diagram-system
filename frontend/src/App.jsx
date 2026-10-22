@@ -21,7 +21,7 @@ import { parseDpwhStation } from './utils/chainage'
 import { readUploadMeta, writeUploadMeta } from './utils/uploadMeta'
 import { fetchMe, signInWithGoogle, signOut } from './api/auth'
 import { fetchGuestStatus } from './api/guest'
-import { fetchWorkspaceContext, switchWorkspace, fetchNotifications, markNotificationsSeen } from './api/workspace'
+import { fetchWorkspaceContext, switchWorkspace, fetchNotifications, markNotificationsSeen, fetchShares } from './api/workspace'
 import { readActiveWorkspaceOwnerId, writeActiveWorkspaceOwnerId } from './utils/activeWorkspace'
 import { showToast } from './components/common/DialogProvider'
 import './App.css'
@@ -102,6 +102,26 @@ export default function App() {
   // not yet loaded; the header/switcher/banner all treat that as "own".
   const [workspaceContext, setWorkspaceContext] = useState(null)
   const [shareModalOpen, setShareModalOpen] = useState(false)
+  // Count for the header Share button's "Share · N" pill -- fetched only
+  // when actually viewing your own workspace (sharing is meaningless from
+  // someone else's), and refreshed when the Share modal closes rather than
+  // polled, since who you've shared with changes rarely compared to the
+  // notification badge's own 15s poll.
+  const [shareCount, setShareCount] = useState(0)
+
+  async function refreshShareCount() {
+    if (workspaceContext?.mode !== 'own') {
+      setShareCount(0)
+      return
+    }
+    const res = await fetchShares().catch(() => null)
+    setShareCount(res?.people?.length || 0)
+  }
+
+  useEffect(() => {
+    refreshShareCount()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceContext?.mode, workspaceContext?.owner_user_id])
   // Share notifications (badge count + dropdown New/role-changed pills),
   // per /api/workspace/notifications -- pulseKey increments only when
   // new_count goes UP, so the badge's one-shot pulse (see UserMenu) replays
@@ -509,6 +529,28 @@ export default function App() {
     }
   }
 
+  // "Delete all data" (optionally one District) -- same full-reset shape as
+  // handleRestored below (an arbitrary set of roads just vanished, so
+  // there's no "preserve the current selection/filters" to attempt), plus
+  // clearing "Last file" since there may be nothing left that it still
+  // describes accurately.
+  async function handleDeletedAllData() {
+    setSelectedDistrict('')
+    setSelectedSectionId('')
+    setRoadDetail(null)
+    setHasGenerated(false)
+    setGeneratedRange(null)
+    setRange({ startRaw: '', endRaw: '' })
+    setTableFilters(EMPTY_TABLE_FILTERS)
+    setTablePage(1)
+    setUploadMeta(null)
+    writeUploadMeta(null)
+    await refreshRoads()
+    await refreshSegmentsPage(1, EMPTY_TABLE_FILTERS, tableSort)
+    await refreshSummary()
+    await refreshLaneCounts()
+  }
+
   async function handleRestored() {
     // A restore can replace or merge an arbitrary set of roads (including a
     // full wipe-and-replace) -- rather than trying to cleverly preserve
@@ -652,6 +694,7 @@ export default function App() {
         workspaceContext={workspaceContext}
         onSwitchWorkspace={handleSwitchWorkspace}
         onOpenShare={() => setShareModalOpen(true)}
+        shareCount={shareCount}
         notifications={notifications}
         onDropdownClose={handleDropdownClose}
       />
@@ -680,6 +723,7 @@ export default function App() {
             ref={uploadPanelRef}
             onUploaded={handleUploaded}
             onRestored={handleRestored}
+            onDeletedAll={handleDeletedAllData}
             roads={roads}
             uploadMeta={uploadMeta}
             collapsed={sidebarCollapsed}
@@ -755,7 +799,10 @@ export default function App() {
         <ShareModal
           ownerName={authUser?.name}
           ownerEmail={authUser?.email}
-          onClose={() => setShareModalOpen(false)}
+          onClose={() => {
+            setShareModalOpen(false)
+            refreshShareCount()
+          }}
         />
       )}
     </div>

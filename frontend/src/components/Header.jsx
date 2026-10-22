@@ -72,6 +72,7 @@ const Header = forwardRef(function Header(
     workspaceContext,
     onSwitchWorkspace,
     onOpenShare,
+    shareCount = 0,
     notifications,
     onDropdownClose,
   },
@@ -205,22 +206,30 @@ const Header = forwardRef(function Header(
           {canShare && (
             <button
               type="button"
-              className="btn-compact header-share-btn"
+              className="header-share-btn"
               onClick={isOwnWorkspace ? onOpenShare : undefined}
               disabled={!isOwnWorkspace}
-              title={isOwnWorkspace ? undefined : 'Only the owner can do this.'}
-              aria-label={isOwnWorkspace ? 'Share' : 'Only the owner can do this.'}
+              title={isOwnWorkspace ? 'Share' : 'Only the owner can share'}
+              aria-label={
+                isOwnWorkspace
+                  ? shareCount > 0
+                    ? `Share · shared with ${shareCount} ${shareCount === 1 ? 'person' : 'people'}`
+                    : 'Share'
+                  : 'Only the owner can share'
+              }
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path
-                  d="M16 6a3 3 0 1 0-2.83-4H13A3 3 0 1 0 16 6ZM6 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm12 6a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM8.6 13.5l6.8-3.9M8.6 14.5l6.8 3.9"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+                <path d="M2 21a7 7 0 0 1 14 0" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M19 8v6M16 11h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
               </svg>
-              Share
+              <span className="header-share-label">Share</span>
+              {isOwnWorkspace && shareCount > 0 && (
+                <span className="header-share-count" aria-hidden="true">
+                  &middot; {shareCount}
+                </span>
+              )}
+              {isOwnWorkspace && shareCount > 0 && <span className="header-share-dot" aria-hidden="true" />}
             </button>
           )}
           {!authChecked ? (

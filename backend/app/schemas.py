@@ -360,6 +360,31 @@ class LaneCountsOut(BaseModel):
     lanes: list[int]
 
 
+# ===== Delete all / delete by district =====
+# "Delete all data" (optionally scoped to one District) -- distinct from
+# single-section DELETE /{section_id}, which is untouched by this.
+
+
+class DistrictDeleteStat(BaseModel):
+    deo: str
+    sections: int
+    segments: int
+    total_length_m: float
+
+
+class DeletePreviewOut(BaseModel):
+    total_sections: int
+    total_segments: int
+    total_length_m: float
+    districts: list[DistrictDeleteStat]
+
+
+class DeleteAllResult(BaseModel):
+    deleted_sections: int
+    deleted_segments: int
+    total_length_m: float
+
+
 # ===== Backup / Restore =====
 # A backup is a full snapshot of what's in the backend DB -- road data was
 # never stored client-side, so this is what actually protects against the

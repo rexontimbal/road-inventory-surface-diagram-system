@@ -91,6 +91,19 @@ export async function clearUploadLog() {
   return handleResponse(res)
 }
 
+export async function fetchDeletePreview() {
+  const res = await fetch(`${BASE}/delete-preview`, { credentials: 'include' })
+  return handleResponse(res)
+}
+
+// district: null/undefined deletes everything in the active workspace;
+// otherwise narrows to just that District (DEO).
+export async function deleteAllRoads(district) {
+  const params = district ? `?district=${encodeURIComponent(district)}` : ''
+  const res = await fetch(`${BASE}${params}`, { method: 'DELETE', credentials: 'include' })
+  return handleResponse(res)
+}
+
 export async function fetchRoadsList() {
   const res = await fetch(BASE)
   return handleResponse(res)

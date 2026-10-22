@@ -24,6 +24,9 @@ from app.schemas import (
     RoadImportedOut,
     RoadPreviewDuplicate,
     RoadPreviewNew,
+    DeleteAllResult,
+    DeletePreviewOut,
+    DistrictDeleteStat,
     RoadRejectionOut,
     RoadSkippedOut,
     RoadSummary,
@@ -918,6 +921,83 @@ def clear_upload_log(db: Session = Depends(get_db), scope: Scope = Depends(get_s
     count = apply_scope(db.query(UploadLogEntry), UploadLogEntry, scope).delete()
     db.commit()
     return {"cleared": count}
+
+
+@router.get("/delete-preview", response_model=DeletePreviewOut)
+def get_delete_preview(db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
+    """Counts for the "Delete all data" confirmation modal -- overall totals
+    plus a per-district breakdown, in one request, so the modal can show
+    live counts for whichever scope (All data / one District) the user has
+    selected without a round trip per selection. Owner-only, same as the
+    delete itself -- there's no reason for an Editor/Viewer to ever see
+    this (the button that would open it is disabled for them anyway), and
+    keeping the check here too means this endpoint is never a back door.
+    Road.segment_count/total_length_m are the denormalized per-road totals
+    already kept in sync at upload/edit time -- summing those is exact and
+    doesn't need a join against road_segments at all."""
+    require_owner(scope)
+    roads = apply_scope(db.query(Road), Road, scope).all()
+    by_district: dict[str, DistrictDeleteStat] = {}
+    for r in roads:
+        key = r.deo or "(No District)"
+        stat = by_district.get(key)
+        if stat is None:
+            stat = DistrictDeleteStat(deo=key, sections=0, segments=0, total_length_m=0.0)
+            by_district[key] = stat
+        stat.sections += 1
+        stat.segments += r.segment_count
+        stat.total_length_m += r.total_length_m
+    return DeletePreviewOut(
+        total_sections=len(roads),
+        total_segments=sum(r.segment_count for r in roads),
+        total_length_m=sum(r.total_length_m for r in roads),
+        districts=sorted(by_district.values(), key=lambda d: d.deo),
+    )
+
+
+@router.delete("", response_model=DeleteAllResult)
+def delete_all_roads(district: str | None = None, db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
+    """Deletes every road (optionally narrowed to one District) in the
+    ACTIVE workspace only -- owner-only, same reasoning as Clear History:
+    this is a blast-radius action across the whole workspace, not one
+    section's data, so an Editor being allowed to write segments doesn't
+    extend to this. RoadSegment rows are removed by the DB's own ON DELETE
+    CASCADE (road_segments' FK to roads, see app/models.py) rather than
+    loading and deleting each one here -- PRAGMA foreign_keys=ON is set on
+    every SQLite connection (app/db.py) and Postgres enforces it natively,
+    so a single bulk DELETE on roads is both correct and fast regardless of
+    how many segments are attached. Upload History is deliberately NOT
+    touched -- only one new entry is added to it, same as every other
+    write in this router."""
+    require_owner(scope)
+    query = apply_scope(db.query(Road), Road, scope)
+    if district:
+        query = query.filter(Road.deo == district)
+    roads = query.all()
+    section_count = len(roads)
+    if section_count == 0:
+        raise HTTPException(status_code=404, detail="No matching road data to delete")
+    segment_count = sum(r.segment_count for r in roads)
+    total_length_m = sum(r.total_length_m for r in roads)
+
+    query.delete(synchronize_session=False)
+
+    label = "ALL" if not district else f"DISTRICT: {district}"
+    summary = (
+        f"{section_count} section{'s' if section_count != 1 else ''} · "
+        f"{segment_count} segment{'s' if segment_count != 1 else ''} · "
+        f"{total_length_m / 1000:.1f} km"
+    )
+    write_log_entry(
+        db,
+        kind="delete",
+        status="completed",
+        details=[{"section_id": label, "road_name": summary, "action": "deleted"}],
+        **owner_kwargs(scope),
+        **user_kwargs(scope),
+    )
+    db.commit()
+    return DeleteAllResult(deleted_sections=section_count, deleted_segments=segment_count, total_length_m=total_length_m)
 
 
 @router.get("/{section_id}", response_model=RoadDetail)
