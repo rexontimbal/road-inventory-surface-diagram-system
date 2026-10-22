@@ -81,6 +81,11 @@ const UploadPanel = forwardRef(function UploadPanel(
   // to true before workspaceContext has loaded, matching every other
   // canEdit-style check in the app.
   const isOwner = !workspaceContext || workspaceContext.role === 'owner'
+  // Drives "Backup data"'s disabled state -- reflects the live roads list, so
+  // it flips back to enabled the moment an upload/restore lands (onUploaded/
+  // onRestored both update this prop in App.jsx) and disables again right
+  // after Delete All Data clears it, with no separate state to keep in sync.
+  const isWorkspaceEmpty = !roads || roads.length === 0
   const fileInputRef = useRef(null)
   const restoreInputRef = useRef(null)
   const [fileName, setFileName] = useState('')
@@ -204,7 +209,7 @@ const UploadPanel = forwardRef(function UploadPanel(
       const backup = await downloadBackupFile()
       showToast({
         variant: 'success',
-        message: `Backup saved (${backup.counts.roads.toLocaleString()} section${backup.counts.roads !== 1 ? 's' : ''}, ${backup.counts.segments.toLocaleString()} segments)`,
+        message: `Backup saved · ${backup.counts.roads.toLocaleString()} section${backup.counts.roads !== 1 ? 's' : ''} · ${backup.counts.segments.toLocaleString()} segments`,
       })
     } catch (err) {
       showToast({ variant: 'danger', message: `Backup failed: ${err.message}` })
@@ -435,7 +440,13 @@ const UploadPanel = forwardRef(function UploadPanel(
       </div>
 
       <div className="backup-actions">
-        <button type="button" className="btn-compact" onClick={handleBackup} disabled={backingUp}>
+        <button
+          type="button"
+          className="btn-compact"
+          onClick={handleBackup}
+          disabled={backingUp || isWorkspaceEmpty}
+          title={!backingUp && isWorkspaceEmpty ? 'Nothing to back up yet. Upload data first.' : undefined}
+        >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M12 16V4m0 12-4-4m4 4 4-4M4 18v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
           </svg>

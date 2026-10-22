@@ -44,6 +44,8 @@ def _prune_pending_restores():
 @router.get("/export", response_model=BackupExport)
 def export_backup(db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
     roads = apply_scope(db.query(Road), Road, scope).order_by(Road.section_id).all()
+    if not roads:
+        raise HTTPException(status_code=400, detail="There's no data to back up yet.")
     backup_roads: list[BackupRoad] = []
     total_segments = 0
     for road in roads:
