@@ -124,8 +124,15 @@ export default function RoadInventoryTable({
   onSortChange,
   onSegmentEdited,
   canEdit = true,
+  highlightedSegmentId,
+  onRowSelect,
 }) {
   const records = segmentsPage?.records || []
+  // Exactly one section selected (not "all sections") -- Section ID/Road
+  // Name repeat identically on every row in this state and are already
+  // shown in the sidebar, so they're dropped in favor of a single caption
+  // above the table instead (see the single-section-caption render below).
+  const singleSection = filters.sectionId ? roads.find((r) => r.section_id === filters.sectionId) : null
   const hasActiveFilters = !!(
     filters.sectionId ||
     filters.district ||
@@ -288,6 +295,37 @@ export default function RoadInventoryTable({
       window.scrollBy({ top: freshCellRect.bottom - window.innerHeight + 8, behavior: 'smooth' })
     }
   }
+
+  // Scrolls to a row highlighted from OUTSIDE this table -- clicking a
+  // diagram block (see App.jsx's handleDiagramBlockSelect) may have just
+  // switched the page this row lives on, so this only fires once the row
+  // actually shows up in `records` (the newly-fetched page), not on every
+  // highlightedSegmentId change. Reuses actionsCellRefs (already keyed by
+  // row id for the edit-row auto-scroll above) purely as a position
+  // reference -- no horizontal scroll here, this isn't about revealing the
+  // actions column, just making the row vertically visible.
+  useEffect(() => {
+    if (highlightedSegmentId == null) return
+    const cell = actionsCellRefs.current.get(highlightedSegmentId)
+    const wrap = tableScrollRef.current
+    if (!cell || !wrap) return
+
+    const cellRect = cell.getBoundingClientRect()
+    const wrapRect = wrap.getBoundingClientRect()
+    if (cellRect.bottom > wrapRect.bottom) {
+      wrap.scrollTop += cellRect.bottom - wrapRect.bottom + 8
+    } else if (cellRect.top < wrapRect.top) {
+      wrap.scrollTop -= wrapRect.top - cellRect.top + 8
+    }
+
+    const freshCellRect = cell.getBoundingClientRect()
+    if (freshCellRect.top < APP_HEADER_HEIGHT) {
+      window.scrollBy({ top: freshCellRect.top - APP_HEADER_HEIGHT - 8, behavior: 'smooth' })
+    } else if (freshCellRect.bottom > window.innerHeight) {
+      window.scrollBy({ top: freshCellRect.bottom - window.innerHeight + 8, behavior: 'smooth' })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightedSegmentId, records])
 
   function startEdit(r) {
     setEditingId(r.id)
@@ -614,12 +652,18 @@ export default function RoadInventoryTable({
         </div>
       )}
 
+      {singleSection && (
+        <p className="single-section-caption">
+          {singleSection.section_id} · {singleSection.road_name}
+        </p>
+      )}
+
       <div
         className={`table-scroll thin-scroll${tableScrolledOver ? ' table-scroll-has-overflow' : ''}`}
         ref={tableScrollRef}
         onScroll={handleTableScroll}
       >
-        <table>
+        <table className={singleSection ? 'inventory-table-single-section' : ''}>
           <thead>
             <tr>
               {COLUMNS.map((col, i) => (
@@ -656,11 +700,22 @@ export default function RoadInventoryTable({
             )}
             {records.map((r) => {
               const isEditing = editingId === r.id
+              const isHighlighted = highlightedSegmentId === r.id
               return (
                 <tr
                   key={`${r.section_id}-${r.index}`}
-                  className={isEditing ? 'editing-row' : ''}
+                  className={`${isEditing ? 'editing-row' : ''}${isHighlighted ? ' row-highlighted' : ''}`}
                   onKeyDown={isEditing ? (e) => handleRowKeyDown(e, r) : undefined}
+                  onClick={(e) => {
+                    if (isEditing) return
+                    // Clicks on the edit button/inputs/Save/Cancel/any
+                    // CustomSelect inside the row are its own interaction,
+                    // not a row-select -- only an otherwise-plain click
+                    // (station cells, the status badge, blank row space)
+                    // highlights the diagram block.
+                    if (e.target.closest('button, input, .custom-select-trigger, .custom-select-panel')) return
+                    onRowSelect?.(r)
+                  }}
                 >
                   <td>{r.index}</td>
                   <td title={sectionTooltip(r)}>{r.section_id}</td>

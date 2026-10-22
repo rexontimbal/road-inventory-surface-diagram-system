@@ -69,6 +69,11 @@ export default function App() {
   const [tablePage, setTablePage] = useState(1)
   const [tableFilters, setTableFilters] = useState(EMPTY_TABLE_FILTERS)
   const [tableSort, setTableSort] = useState({ sortBy: null, sortDir: 'asc' })
+  // Shared between the table and the diagram -- a RoadSegment id, set by
+  // clicking either side (a table row or a diagram block) so the OTHER one
+  // highlights/scrolls to the matching spot. See handleRowSelect (table ->
+  // diagram) and handleDiagramBlockSelect (diagram -> table) below.
+  const [highlightedSegmentId, setHighlightedSegmentId] = useState(null)
   const [networkSummary, setNetworkSummary] = useState(null)
   const [laneCounts, setLaneCounts] = useState([])
   const [settings, setSettings] = useState({ stationIntervalM: 1000, stationsPerLine: 10 })
@@ -461,6 +466,53 @@ export default function App() {
     }
     setTableFilters(newFilters)
     setTablePage(1)
+    // A changed filter can easily no longer show (or mean) whatever was
+    // highlighted before -- stale rather than useful at that point.
+    setHighlightedSegmentId(null)
+  }
+
+  // Table row -> diagram block. Only actually highlights anything in the
+  // diagram when the clicked row belongs to whatever section the diagram is
+  // CURRENTLY showing (DiagramPanel's own highlight search simply finds no
+  // match and no-ops otherwise, e.g. a row from a different section while
+  // viewing "all sections") -- this never needs to regenerate or switch the
+  // diagram itself, only tell it what to outline.
+  function handleRowSelect(row) {
+    setHighlightedSegmentId(row.id)
+  }
+
+  // Diagram block -> table row. Unlike handleFilterChange above, this must
+  // NOT go through handleSelectSection -- the diagram is already showing
+  // the right road (the user just clicked a block in it); re-running that
+  // would refetch roadDetail and reset hasGenerated/range, wiping out the
+  // very diagram they clicked. Only the table's own section filter (and,
+  // if the row isn't on the current page, which page it's showing) needs to
+  // follow -- so this touches tableFilters/tablePage directly instead.
+  async function handleDiagramBlockSelect({ id, sectionId }) {
+    setHighlightedSegmentId(id)
+    const nextFilters = tableFilters.sectionId === sectionId ? tableFilters : { ...tableFilters, sectionId }
+    if (nextFilters !== tableFilters) setTableFilters(nextFilters)
+    try {
+      setTablePage(await findSegmentPage(id, nextFilters, tableSort))
+    } catch {
+      setTablePage(1)
+    }
+  }
+
+  // Finds which PAGE_SIZE page `id` falls on under `filters`/`sort` -- there
+  // is no "find this row's page" endpoint, so this scans in page_size=500
+  // batches (the API's own max) until the id turns up, computing the real
+  // page from its position in that sorted order. Usually just one request:
+  // a single section's segment count rarely exceeds 500.
+  async function findSegmentPage(id, filters, sort) {
+    let page = 1
+    while (true) {
+      const data = await fetchSegmentsPage(page, 500, filters, sort)
+      const idx = data.records.findIndex((r) => r.id === id)
+      if (idx >= 0) return Math.floor(((page - 1) * 500 + idx) / PAGE_SIZE) + 1
+      if (page >= data.total_pages) return 1
+      page += 1
+    }
   }
 
   // Three-state cycle per column: ascending -> descending -> back to the
@@ -564,6 +616,7 @@ export default function App() {
     setRange({ startRaw: '', endRaw: '' })
     setTableFilters(EMPTY_TABLE_FILTERS)
     setTablePage(1)
+    setHighlightedSegmentId(null)
     await refreshRoads()
     await refreshSegmentsPage(1, EMPTY_TABLE_FILTERS, tableSort)
     await refreshSummary()
@@ -581,6 +634,7 @@ export default function App() {
     if (road) setSelectedDistrict(road.deo || '')
     setHasGenerated(false)
     setGeneratedRange(null)
+    setHighlightedSegmentId(null)
     // Keep the table's SECTION filter in sync when the section is picked from
     // "2. Select Section" rather than from the table filter itself.
     setTableFilters((f) => (f.sectionId === sectionId ? f : { ...f, sectionId }))
@@ -774,6 +828,8 @@ export default function App() {
             onSortChange={handleSortChange}
             onSegmentEdited={handleSegmentEdited}
             canEdit={canEdit}
+            highlightedSegmentId={highlightedSegmentId}
+            onRowSelect={handleRowSelect}
           />
           <DiagramPanel
             ref={diagramPanelRef}
@@ -781,6 +837,8 @@ export default function App() {
             diagramVersion={diagramVersion}
             hasGenerated={hasGenerated}
             hasRoads={roads.length > 0}
+            highlightedSegmentId={highlightedSegmentId}
+            onBlockSelect={handleDiagramBlockSelect}
           />
         </main>
       </div>

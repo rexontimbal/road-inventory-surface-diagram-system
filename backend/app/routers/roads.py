@@ -609,6 +609,8 @@ def list_segments(
             ld=seg_ld,
             start_station=seg.start_text,
             end_station=seg.end_text,
+            start_m=seg.start_m,
+            end_m=seg.end_m,
             length_m=seg.length_m,
             irregular_km_post=seg.irregular_km_post,
             num_lanes=seg.num_lanes,
@@ -714,6 +716,8 @@ def edit_segment(
             road_name=road.road_name,
             start_station=seg.start_text,
             end_station=seg.end_text,
+            start_m=seg.start_m,
+            end_m=seg.end_m,
             length_m=seg.length_m,
             irregular_km_post=seg.irregular_km_post,
             num_lanes=seg.num_lanes,
@@ -1072,6 +1076,7 @@ def get_road_detail(section_id: str, db: Session = Depends(get_db), scope: Scope
 
     segments = [
         SegmentOut(
+            id=seg.id,
             seq_no=seg.seq_no,
             start_station=seg.start_text,
             end_station=seg.end_text,

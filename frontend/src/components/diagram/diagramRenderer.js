@@ -156,6 +156,10 @@ const MERGE_EPSILON_M = 0.01
 // === prev.end_m); a gap or overlap always starts a new block, so those stay
 // visible exactly as before. The table/API data itself is untouched -- this
 // runs only on the array handed to the renderer.
+// `mergedIds` carries every original segment id folded into this block
+// (not just the first) -- clicking a table row for ANY of those original
+// segments must still resolve back to whichever visual block it ended up
+// merged into, not just the one whose id happens to be first.
 function mergeSegmentsForDiagram(segments) {
   const merged = []
   for (const seg of segments) {
@@ -172,8 +176,9 @@ function mergeSegmentsForDiagram(segments) {
       last.end_station = seg.end_station
       last.length_m += seg.length_m
       last.mergedCount += 1
+      last.mergedIds.push(seg.id)
     } else {
-      merged.push({ ...seg, mergedCount: 1 })
+      merged.push({ ...seg, mergedCount: 1, mergedIds: [seg.id] })
     }
   }
   return merged
@@ -349,8 +354,14 @@ export function renderSingleStrip(canvas, road, settings, stripIndex, range, sca
  * pass devicePixelRatio for a crisp on-screen render, devicePixelRatio*zoom
  * to re-render (rather than CSS-stretch) a zoomed view, or a flat HD/export
  * factor -- without changing any of the logical layout coordinates below.
+ * `highlightedId` (optional) -- a RoadSegment id to outline, e.g. after the
+ * user clicks its row in the inventory table. Checked against each block's
+ * `mergedIds` (not just its own id), since several original segments can be
+ * merged into one visual block -- clicking any row that fell into that
+ * block should still highlight it. Only used for the on-screen render
+ * (print/export never pass this).
  */
-export function renderDiagram(canvas, road, settings, range, scale = 1) {
+export function renderDiagram(canvas, road, settings, range, scale = 1, highlightedId = null) {
   const ctx = canvas.getContext('2d')
   const { stationIntervalM } = settings
   const plan = computeStripPlan(road, settings, range)
@@ -404,7 +415,31 @@ export function renderDiagram(canvas, road, settings, range, scale = 1) {
     })
   }
 
+  if (highlightedId != null) {
+    const match = hitRegions.find((r) => r.segment && !r.segment.isNoData && r.segment.mergedIds?.includes(highlightedId))
+    if (match) drawHighlightOutline(ctx, match)
+  }
+
   return { hitRegions }
+}
+
+// White halo + bold amber outline around a hit region -- the halo keeps the
+// outline readable against every fill color a block can have (solid black
+// asphalt, light gravel hatch, white "no lane", etc.), not just some of
+// them. Amber (not the app's usual --accent blue) so it reads as a clearly
+// different "this one's selected" marker, not just another blue UI element
+// blending into the lane markings/buttons already on screen -- matches the
+// same amber used for the highlighted table row (App.css .row-highlighted).
+function drawHighlightOutline(ctx, region) {
+  const pad = 2 // drawn slightly outside the block, not flush on its edge, so it reads as a marker around it rather than part of the fill
+  ctx.save()
+  ctx.strokeStyle = '#ffffff'
+  ctx.lineWidth = 7
+  ctx.strokeRect(region.x - pad, region.y - pad, region.w + pad * 2, region.h + pad * 2)
+  ctx.strokeStyle = '#d97706'
+  ctx.lineWidth = 3.5
+  ctx.strokeRect(region.x - pad, region.y - pad, region.w + pad * 2, region.h + pad * 2)
+  ctx.restore()
 }
 
 function drawStrip(ctx, cfg) {

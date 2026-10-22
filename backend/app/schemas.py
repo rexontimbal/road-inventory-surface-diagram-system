@@ -121,6 +121,7 @@ class RoadSummary(BaseModel):
 
 
 class SegmentOut(BaseModel):
+    id: int
     seq_no: int
     start_station: str
     end_station: str
@@ -154,6 +155,8 @@ class SegmentRecord(BaseModel):
     ld: str | None = None
     start_station: str
     end_station: str
+    start_m: float
+    end_m: float
     length_m: float
     irregular_km_post: bool
     num_lanes: int

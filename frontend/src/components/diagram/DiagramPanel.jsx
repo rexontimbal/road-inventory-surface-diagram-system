@@ -41,6 +41,10 @@ function computeCompletion(roadDetail, range) {
 }
 
 const WRAP_PADDING_PX = 32 // .diagram-canvas-wrap's 16px padding on each side
+// Matches .app-header-spacer in App.css (the fixed app header's height) --
+// same constant RoadInventoryTable.jsx keeps its own copy of, for the same
+// "don't scroll a selected row/block under the fixed header" reason.
+const APP_HEADER_HEIGHT = 72
 // Print/export don't have a "device" to match -- both render once, offscreen
 // or into a page the viewer may still pinch-zoom, so they use a flat HD
 // factor instead of devicePixelRatio (which could be as low as 1 even on a
@@ -48,7 +52,10 @@ const WRAP_PADDING_PX = 32 // .diagram-canvas-wrap's 16px padding on each side
 const PRINT_SCALE = 3
 const EXPORT_SCALE = 2
 
-const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, hasGenerated, hasRoads }, ref) {
+const DiagramPanel = forwardRef(function DiagramPanel(
+  { road, diagramVersion, hasGenerated, hasRoads, highlightedSegmentId, onBlockSelect },
+  ref
+) {
   const dpr = useDevicePixelRatio()
   const canvasRef = useRef(null)
   const canvasWrapRef = useRef(null)
@@ -140,19 +147,21 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
     // below), so this only adds pixel density, not visual size. Re-renders
     // (not CSS-stretches) whenever dpr itself changes, e.g. dragging the
     // window to a differently-scaled monitor.
-    const result = renderDiagram(canvasRef.current, road.roadDetail, road.settings, road.range, dpr)
+    const result = renderDiagram(canvasRef.current, road.roadDetail, road.settings, road.range, dpr, highlightedSegmentId)
     hitRegionsRef.current = result?.hitRegions || []
 
     // One canvas per strip for print, sized to fit one page each -- avoids
     // the browser pushing the whole tall combined canvas to a near-empty
     // leading page before it "fits". Rendered at a flat HD factor rather
     // than dpr, since the screen's own pixel density has nothing to do with
-    // how sharp a printed page or PDF should be.
+    // how sharp a printed page or PDF should be. Never highlighted -- that's
+    // a transient on-screen selection, not something a saved/printed page
+    // should carry.
     printCanvasRefs.current.slice(0, numStrips).forEach((c, i) => {
       if (c) renderSingleStrip(c, road.roadDetail, road.settings, i, road.range, PRINT_SCALE)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [diagramVersion, numStrips, dpr])
+  }, [diagramVersion, numStrips, dpr, highlightedSegmentId])
 
   // Recomputes the fit-to-width scale from the diagram's LOGICAL size (not
   // canvas.width/height, which is now dpr-scaled and would otherwise make
@@ -185,6 +194,49 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
     return () => window.removeEventListener('resize', recomputeFitScale)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [diagramVersion, numStrips])
+
+  // Scrolls the just-highlighted block into view -- triggered when the user
+  // clicks a matching row in the inventory table (highlightedSegmentId is
+  // shared App.jsx state, not local). hitRegionsRef is already populated by
+  // the render effect above (same render pass, earlier in declaration
+  // order), and fitScale/canvasWrapRef/canvasRef all reflect the CURRENT
+  // render by closure, so no extra dependency bookkeeping is needed beyond
+  // highlightedSegmentId itself.
+  useEffect(() => {
+    if (highlightedSegmentId == null) return
+    const wrap = canvasWrapRef.current
+    const canvas = canvasRef.current
+    if (!wrap || !canvas) return
+    const region = hitRegionsRef.current.find((r) => r.segment?.mergedIds?.includes(highlightedSegmentId))
+    if (!region) return
+
+    const regionLeft = region.x * fitScale
+    const regionRight = (region.x + region.w) * fitScale
+    const regionTop = region.y * fitScale
+    const regionBottom = (region.y + region.h) * fitScale
+
+    // Horizontal, inside the canvas's own scroll box -- center the block if
+    // it isn't already fully visible.
+    const viewLeft = wrap.scrollLeft
+    const viewRight = viewLeft + wrap.clientWidth
+    if (regionLeft < viewLeft || regionRight > viewRight) {
+      const target = regionLeft - wrap.clientWidth / 2 + (regionRight - regionLeft) / 2
+      wrap.scrollTo({ left: Math.max(0, target), behavior: 'smooth' })
+    }
+
+    // Vertical, on the page itself -- the diagram panel can sit well below
+    // the fold, same APP_HEADER_HEIGHT offset the table's own scroll-to-row
+    // uses so the block doesn't land underneath the fixed app header.
+    const canvasRect = canvas.getBoundingClientRect()
+    const absoluteTop = canvasRect.top + window.scrollY + regionTop
+    const absoluteBottom = canvasRect.top + window.scrollY + regionBottom
+    if (absoluteTop < window.scrollY + APP_HEADER_HEIGHT) {
+      window.scrollBy({ top: absoluteTop - window.scrollY - APP_HEADER_HEIGHT - 8, behavior: 'smooth' })
+    } else if (absoluteBottom > window.scrollY + window.innerHeight) {
+      window.scrollBy({ top: absoluteBottom - (window.scrollY + window.innerHeight) + 8, behavior: 'smooth' })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightedSegmentId])
 
   function handleCanvasWrapScroll(e) {
     setCanvasScrolled(e.currentTarget.scrollLeft > 0)
@@ -244,6 +296,21 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
       isDone: region.isDone,
       emptyRow: region.segment.isNoData ? null : hoveredEmptyRowType(region, ny),
     })
+  }
+
+  // Resolves the clicked block the same way handleMouseMove resolves a
+  // hover, then reports its FIRST underlying segment id -- a merged block
+  // can fold in several original rows, and "its first row" is the one the
+  // table should scroll to and highlight.
+  function handleCanvasClick(e) {
+    if (!road) return
+    const nx = e.nativeEvent.offsetX / fitScale
+    const ny = e.nativeEvent.offsetY / fitScale
+    const region = hitRegionsRef.current.find(
+      (r) => nx >= r.x && nx <= r.x + r.w && ny >= r.y && ny <= r.y + r.h
+    )
+    if (!region || region.segment.isNoData) return
+    onBlockSelect?.({ id: region.segment.mergedIds[0], sectionId: road.roadDetail.section_id })
   }
 
   return (
@@ -364,9 +431,13 @@ const DiagramPanel = forwardRef(function DiagramPanel({ road, diagramVersion, ha
               // CSS size displays at 1:1 -- i.e. dpr times too big on-screen
               // without this, even when fitScale is 1 and nothing is meant
               // to be scaled down at all.
-              style={nativeSize.width ? { width: nativeSize.width * fitScale, height: nativeSize.height * fitScale } : undefined}
+              style={{
+                ...(nativeSize.width ? { width: nativeSize.width * fitScale, height: nativeSize.height * fitScale } : undefined),
+                cursor: 'pointer',
+              }}
               onMouseMove={handleMouseMove}
               onMouseLeave={() => setTooltip(null)}
+              onClick={handleCanvasClick}
             />
           </div>
         )}
