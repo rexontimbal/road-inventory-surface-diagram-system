@@ -4004,11 +4004,15 @@ tbody tr:hover .row-edit-btn,
   flex-shrink: 0;
 }
 
-/* ===== Toast stack =====
-   Deliberately NOT theme-reactive (no var(--text-primary) etc.) -- these
-   are fixed white cards with slate text regardless of the app's own
-   light/dark tokens, per the agreed design. Centered under the header so a
-   toast never covers the avatar/Share button in the header's top-right. */
+/* ===== Toast pill =====
+   ONE design, used in both places a toast can render: docked in the header
+   (.app-header-toast-slot, every width outside fullscreen) and the centered
+   top stack inside fullscreen (.toast-stack, which has no header to dock
+   into). Dark glass pill, NOT theme-reactive (fixed dark surface + white/
+   slate text regardless of the app's own light/dark tokens) -- it reads as
+   part of the header's own dark chrome rather than a floating light-mode
+   card dropped on top of it. Sized to its content (inline-flex, no forced
+   width) so a short message renders as a short pill, not a wide bar. */
 .toast-stack {
   position: fixed;
   top: 80px;
@@ -4019,301 +4023,290 @@ tbody tr:hover .row-edit-btn,
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  width: min(480px, calc(100% - 32px));
 }
-.toast {
+.toast-pill {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  min-width: 320px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
-  overflow: hidden;
-  animation: toast-enter 220ms ease-out both;
-}
-.toast-closing {
-  animation: toast-exit 180ms ease-in both;
-}
-@keyframes toast-enter {
-  from {
-    opacity: 0;
-    transform: translateY(-8px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-@keyframes toast-exit {
-  from {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: translateY(-8px) scale(0.98);
-  }
-}
-.toast-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 12px 16px 15px;
-}
-.toast-icon {
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
+  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 8px;
+  width: auto;
+  max-width: min(440px, calc(100vw - 32px));
+  padding: 7px 14px 7px 7px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.72);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  backdrop-filter: blur(12px) saturate(140%);
+  border: 1px solid var(--toast-pill-border, rgba(148, 163, 184, 0.35));
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(255, 255, 255, 0.04),
+    0 0 18px var(--toast-pill-glow, rgba(148, 163, 184, 0.25)),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  animation: toast-pill-enter 240ms ease-out both;
 }
-.toast-icon-success {
-  background: #dcfce7;
-  color: #16a34a;
+/* Browsers without backdrop-filter support (point 6) -- same border/glow,
+   just an opaque dark surface instead of frosted glass underneath it. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .toast-pill {
+    background: #0f172a;
+  }
 }
-.toast-icon-info {
-  background: #dbeafe;
-  color: #2563eb;
+.toast-pill-info {
+  --toast-pill-border: rgba(37, 99, 235, 0.35);
+  --toast-pill-glow: rgba(37, 99, 235, 0.25);
 }
-.toast-icon-warning {
-  background: #fef3c7;
-  color: #d97706;
+.toast-pill-success {
+  --toast-pill-border: rgba(22, 163, 74, 0.35);
+  --toast-pill-glow: rgba(22, 163, 74, 0.25);
 }
-.toast-icon-danger {
-  background: #fee2e2;
-  color: #dc2626;
+.toast-pill-warning {
+  --toast-pill-border: rgba(217, 119, 6, 0.35);
+  --toast-pill-glow: rgba(217, 119, 6, 0.25);
 }
-.toast-avatar {
-  flex-shrink: 0;
-  width: 24px;
-  height: 24px;
-  margin-top: 2px;
-  border-radius: 50%;
-  object-fit: cover;
-  background: var(--accent);
+.toast-pill-danger {
+  --toast-pill-border: rgba(220, 38, 38, 0.35);
+  --toast-pill-glow: rgba(220, 38, 38, 0.25);
 }
-.toast-text {
-  flex: 1;
-  min-width: 0;
+.toast-pill-closing {
+  animation: toast-pill-exit 180ms ease-in both;
 }
-.toast-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #0f172a;
-}
-.toast-message {
-  font-size: 13px;
-  color: #64748b;
-  margin-top: 2px;
-  overflow-wrap: break-word;
-}
-.toast-controls {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding-top: 1px;
-}
-.toast-action {
-  flex-shrink: 0;
-  background: none;
-  border: none;
-  padding: 0;
-  height: auto;
-  color: #2563eb;
-  font-size: 13px;
-  font-weight: 600;
-}
-.toast-action:hover {
-  background: none;
-  color: #1d4ed8;
-  text-decoration: underline;
-}
-.toast-close {
-  flex-shrink: 0;
-  background: none;
-  border: none;
-  padding: 0;
-  height: auto;
-  width: 16px;
-  color: #94a3b8;
-  font-size: 16px;
-  line-height: 1;
-}
-.toast-close:hover {
-  background: none;
-  color: #334155;
-}
-/* Absolutely positioned along the card's own bottom edge (not normal flow)
-   so it's a thin line flush with the bottom border, clipped to the card's
-   rounded corners by the card's own overflow:hidden -- not reserving its
-   own row of layout space the way a block-flow bar would. The TRACK is a
-   static faint tint of the variant color; the BAR sits on top of it (same
-   containing block, since position:absolute itself still establishes one
-   for its own children) and shrinks via scaleX, revealing more of the
-   track as time passes. */
-.toast-progress-track {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 3px;
-}
-.toast-progress-track-success {
-  background: rgba(34, 197, 94, 0.15);
-}
-.toast-progress-track-info {
-  background: rgba(37, 99, 235, 0.15);
-}
-.toast-progress-track-warning {
-  background: rgba(217, 119, 6, 0.15);
-}
-.toast-progress-track-danger {
-  background: rgba(220, 38, 38, 0.15);
-}
-.toast-progress-bar {
-  position: absolute;
-  inset: 0;
-  transform-origin: left;
-  animation-timing-function: linear;
-  animation-fill-mode: forwards;
-}
-.toast:hover .toast-progress-bar,
-.toast:focus-within .toast-progress-bar,
-.header-toast:hover .toast-progress-bar,
-.header-toast:focus-within .toast-progress-bar {
-  animation-play-state: paused;
-}
-@keyframes toast-countdown {
+@keyframes toast-pill-enter {
   from {
-    transform: scaleX(1);
+    opacity: 0;
+    transform: translateY(-14px) scale(0.96);
+    filter: blur(6px);
   }
   to {
-    transform: scaleX(0);
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
   }
 }
-/* The "about to close" cue (point 5) -- a fixed 1s fade timed via
-   animation-delay (see ToastProgressBar's inline style) rather than a
-   keyframe percentage, so it lands on the last second of EITHER a 4s or
-   an 8s toast without needing a different keyframe per duration. */
-@keyframes toast-countdown-fade {
+@keyframes toast-pill-exit {
   from {
     opacity: 1;
+    transform: translateY(0) scale(1);
   }
   to {
-    opacity: 0.6;
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .toast-progress-bar {
+  .toast-pill,
+  .toast-pill-closing {
     animation: none !important;
   }
 }
-.toast-progress-success {
-  background: linear-gradient(90deg, #22c55e, #16a34a);
-}
-.toast-progress-info {
-  background: linear-gradient(90deg, #3b82f6, #2563eb);
-}
-.toast-progress-warning {
-  background: linear-gradient(90deg, #f59e0b, #d97706);
-}
-.toast-progress-danger {
-  background: linear-gradient(90deg, #ef4444, #dc2626);
-}
-/* ===== Header-docked toast =====
-   Rendered INSIDE .app-header-toast-slot (see App.css above) -- the ONLY
-   toast presentation outside of fullscreen, at every screen width, always
-   centered on the viewport and vertically centered in the (constant-height)
-   header. Compact single-line variant of the same white-card design as
-   .toast-stack; the centered top stack is used only inside fullscreen,
-   which has no header at all. Width follows the viewport, not the header's
-   free space, so it stays legible down to very narrow screens without
-   ever needing to fall back to a second layout. */
-.header-toast {
+/* Icon circle + its surrounding countdown ring share the same 22px box as
+   their sizing reference -- the ring SVG (6px larger all round, see
+   .toast-pill-ring below) positions itself off of that box, not the icon
+   circle's own element. */
+.toast-pill-icon-wrap {
   position: relative;
-  box-sizing: border-box;
-  width: min(440px, calc(100vw - 32px));
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.22);
-  overflow: hidden;
-  animation: header-toast-enter 200ms ease-out both;
-}
-.header-toast-closing {
-  animation: header-toast-exit 180ms ease-in both;
-}
-@keyframes header-toast-enter {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-@keyframes header-toast-exit {
-  from {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  to {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-}
-.header-toast-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px 9px;
-}
-.header-toast-icon {
   flex-shrink: 0;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
+}
+.toast-pill-icon {
+  position: absolute;
+  inset: 0;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  color: #fff;
 }
-.header-toast-avatar {
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
+.toast-pill-icon-info {
+  background: linear-gradient(135deg, #60a5fa, #2563eb);
+}
+.toast-pill-icon-success {
+  background: linear-gradient(135deg, #4ade80, #16a34a);
+}
+.toast-pill-icon-warning {
+  background: linear-gradient(135deg, #fbbf24, #d97706);
+}
+.toast-pill-icon-danger {
+  background: linear-gradient(135deg, #f87171, #dc2626);
+}
+.toast-pill-avatar {
+  position: absolute;
+  inset: 0;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   object-fit: cover;
   background: var(--accent);
+  box-sizing: border-box;
 }
-.header-toast-text {
-  flex: 1;
+.toast-pill-avatar-info {
+  box-shadow: 0 0 0 1.5px #2563eb;
+}
+.toast-pill-avatar-success {
+  box-shadow: 0 0 0 1.5px #16a34a;
+}
+.toast-pill-avatar-warning {
+  box-shadow: 0 0 0 1.5px #d97706;
+}
+.toast-pill-avatar-danger {
+  box-shadow: 0 0 0 1.5px #dc2626;
+}
+.toast-pill-text {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 12.5px;
-  color: #0f172a;
+  font-size: 13px;
 }
-.header-toast-text strong {
+.toast-pill-text strong {
+  color: #ffffff;
   font-weight: 600;
 }
-.header-toast-text-sep,
-.header-toast-message {
+.toast-pill-sep {
   color: #64748b;
-  font-weight: 400;
 }
-.header-toast-controls {
+.toast-pill-message {
+  color: #cbd5e1;
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.toast-pill-action {
   flex-shrink: 0;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 3px;
+  background: none;
+  border: none;
+  padding: 0;
+  height: auto;
+  font-size: 12px;
+  font-weight: 600;
+}
+.toast-pill-action-info {
+  color: #93c5fd;
+}
+.toast-pill-action-success {
+  color: #86efac;
+}
+.toast-pill-action-warning {
+  color: #fcd34d;
+}
+.toast-pill-action-danger {
+  color: #fca5a5;
+}
+.toast-pill-action:hover {
+  background: none;
+  text-decoration: underline;
+  opacity: 0.85;
+}
+.toast-pill-close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: none;
+  border: none;
+  padding: 0;
+  color: #94a3b8;
+  font-size: 14px;
+  line-height: 1;
+}
+.toast-pill-close:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+/* Countdown RING (replaces the old bottom bar) -- 28px box, 6px larger than
+   the 22px icon/avatar it surrounds, offset -3px on each side so it's
+   visually centered around it rather than clipping it. rotate(-90deg) so
+   the dash animation starts at 12 o'clock instead of 3 o'clock. Track is a
+   static faint tint of the variant color; the bar sits on the same stacking
+   context on top of it and empties via stroke-dashoffset, revealing more of
+   the track as time passes -- same "reveals the track" relationship the old
+   scaleX bar had, just around a circle instead of along a line. r=12,
+   circumference = 2*pi*12 = 75.398 -- hardcoded in both the inline
+   strokeDasharray (ToastProgressRing.jsx) and the keyframe's "to" value
+   below; change one, change both. */
+.toast-pill-ring {
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 28px;
+  height: 28px;
+  transform: rotate(-90deg);
+  pointer-events: none;
+}
+.toast-pill-ring-track {
+  fill: none;
+  stroke-width: 2;
+}
+.toast-pill-ring-track-info {
+  stroke: rgba(37, 99, 235, 0.25);
+}
+.toast-pill-ring-track-success {
+  stroke: rgba(22, 163, 74, 0.25);
+}
+.toast-pill-ring-track-warning {
+  stroke: rgba(217, 119, 6, 0.25);
+}
+.toast-pill-ring-track-danger {
+  stroke: rgba(220, 38, 38, 0.25);
+}
+.toast-pill-ring-bar {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+.toast-pill-ring-info {
+  stroke: #60a5fa;
+}
+.toast-pill-ring-success {
+  stroke: #4ade80;
+}
+.toast-pill-ring-warning {
+  stroke: #fbbf24;
+}
+.toast-pill-ring-danger {
+  stroke: #f87171;
+}
+.toast-pill:hover .toast-pill-ring-bar,
+.toast-pill:focus-within .toast-pill-ring-bar {
+  animation-play-state: paused;
+}
+@keyframes toast-ring-countdown {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: 75.398;
+  }
+}
+/* Same "about to close" cue the old bar had -- a fixed 1s fade timed via
+   animation-delay (see ToastProgressRing's inline style), landing on the
+   last second of either a 4s or an 8s toast without a different keyframe
+   per duration. */
+@keyframes toast-ring-countdown-fade {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.5;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast-pill-ring-bar {
+    animation: none !important;
+    opacity: 0;
+  }
 }
 
 /* ===== Fullscreen Road Surface Diagram ===== */

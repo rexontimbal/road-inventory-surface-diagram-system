@@ -59,8 +59,8 @@ const DEFAULT_DURATIONS = {
 
 const MAX_VISIBLE_STACK_TOASTS = 3
 const EXIT_DURATION_MS = 180
-// The countdown bar fades (opacity 1 -> 0.6) over exactly this long, ending
-// right as the bar itself finishes -- a fixed-length fade timed via
+// The countdown ring fades (opacity 1 -> 0.5) over exactly this long, ending
+// right as the ring itself finishes -- a fixed-length fade timed via
 // animation-delay rather than a keyframe percentage, so it reads as "last
 // 1 second" regardless of whether the toast's own duration is 4s or 8s.
 const FADE_WARN_MS = 1000
@@ -108,16 +108,22 @@ function ToastVariantIcon({ variant }) {
   )
 }
 
+// r=12 circle in a 28x28 viewBox -- see .toast-pill-ring in App.css, which
+// hardcodes the same circumference in its keyframe's "to" value. Change one,
+// change both.
+const RING_RADIUS = 12
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
+
 /**
- * The countdown bar IS the auto-dismiss timer -- `onComplete` (startClose)
- * fires off the bar's own `animationend`, not a parallel setTimeout, so
+ * The countdown ring IS the auto-dismiss timer -- `onComplete` (startClose)
+ * fires off the ring's own `animationend`, not a parallel setTimeout, so
  * pausing on hover (plain CSS `animation-play-state`, no JS involved) and
  * resuming exactly where it left off are both free: there's no separate
  * clock to keep in sync with the visual. prefers-reduced-motion is the one
- * exception -- animation is suppressed (bar just hidden) so animationend
+ * exception -- animation is suppressed (ring just hidden) so animationend
  * would never fire, and a plain setTimeout stands in for it instead.
  */
-function ToastProgressBar({ id, variant, duration, onComplete }) {
+function ToastProgressRing({ id, variant, duration, onComplete }) {
   useEffect(() => {
     if (!prefersReducedMotion) return undefined
     const timeoutId = setTimeout(onComplete, duration)
@@ -129,17 +135,22 @@ function ToastProgressBar({ id, variant, duration, onComplete }) {
 
   if (prefersReducedMotion) {
     return (
-      <div className={`toast-progress-track toast-progress-track-${variant}`}>
-        <div className={`toast-progress-bar toast-progress-${variant}`} style={{ opacity: 0 }} />
-      </div>
+      <svg className="toast-pill-ring" viewBox="0 0 28 28" aria-hidden="true">
+        <circle className={`toast-pill-ring-track toast-pill-ring-track-${variant}`} cx="14" cy="14" r={RING_RADIUS} />
+      </svg>
     )
   }
 
   const fadeDelay = Math.max(duration - FADE_WARN_MS, 0)
   return (
-    <div className={`toast-progress-track toast-progress-track-${variant}`}>
-      <div
-        className={`toast-progress-bar toast-progress-${variant}`}
+    <svg className="toast-pill-ring" viewBox="0 0 28 28" aria-hidden="true">
+      <circle className={`toast-pill-ring-track toast-pill-ring-track-${variant}`} cx="14" cy="14" r={RING_RADIUS} />
+      <circle
+        className={`toast-pill-ring-bar toast-pill-ring-${variant}`}
+        cx="14"
+        cy="14"
+        r={RING_RADIUS}
+        strokeDasharray={RING_CIRCUMFERENCE}
         // Longhand properties, NOT the `animation` shorthand -- the
         // shorthand implicitly sets animation-play-state too (default
         // "running"), and an inline style always beats a class selector's
@@ -148,16 +159,74 @@ function ToastProgressBar({ id, variant, duration, onComplete }) {
         // Leaving animation-play-state out of the inline style entirely
         // lets the CSS hover/focus rule control it normally.
         style={{
-          animationName: 'toast-countdown, toast-countdown-fade',
+          animationName: 'toast-ring-countdown, toast-ring-countdown-fade',
           animationDuration: `${duration}ms, ${FADE_WARN_MS}ms`,
           animationTimingFunction: 'linear, linear',
           animationDelay: `0ms, ${fadeDelay}ms`,
           animationFillMode: 'forwards, forwards',
         }}
         onAnimationEnd={(e) => {
-          if (e.animationName === 'toast-countdown') onComplete()
+          if (e.animationName === 'toast-ring-countdown') onComplete()
         }}
       />
+    </svg>
+  )
+}
+
+/**
+ * The one toast card design, rendered both docked in the header and in the
+ * fullscreen top-center stack (see the two createPortal calls below) -- same
+ * markup and classes either way, only the portal target differs.
+ */
+function ToastPill({ toast, onClose }) {
+  return (
+    <div
+      className={`toast-pill toast-pill-${toast.variant}${toast.closing ? ' toast-pill-closing' : ''}`}
+      role={toast.variant === 'warning' || toast.variant === 'danger' ? 'alert' : 'status'}
+    >
+      <div className="toast-pill-icon-wrap">
+        {toast.avatarUrl ? (
+          <img
+            src={toast.avatarUrl}
+            alt=""
+            className={`toast-pill-avatar toast-pill-avatar-${toast.variant}`}
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          <span className={`toast-pill-icon toast-pill-icon-${toast.variant}`} aria-hidden="true">
+            <ToastVariantIcon variant={toast.variant} />
+          </span>
+        )}
+        <ToastProgressRing
+          id={toast.id}
+          variant={toast.variant}
+          duration={toast.duration}
+          onComplete={() => onClose(toast.id)}
+        />
+      </div>
+      <span className="toast-pill-text" title={[toast.title, toast.message].filter(Boolean).join(' · ')}>
+        {toast.title && <strong>{toast.title}</strong>}
+        {toast.title && toast.message && <span className="toast-pill-sep">&middot;</span>}
+        {toast.message && <span className="toast-pill-message">{toast.message}</span>}
+      </span>
+      {toast.actionLabel && (
+        <button
+          type="button"
+          className={`toast-pill-action toast-pill-action-${toast.variant}`}
+          onClick={() => {
+            toast.onAction?.()
+            onClose(toast.id)
+          }}
+        >
+          {toast.actionLabel}
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M9 6l6 6-6 6" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      )}
+      <button type="button" className="toast-pill-close" onClick={() => onClose(toast.id)} aria-label="Dismiss">
+        ×
+      </button>
     </div>
   )
 }
@@ -332,97 +401,12 @@ export default function DialogProvider({ children }) {
         />
       )}
 
-      {dockToast &&
-        headerSlotEl &&
-        createPortal(
-          <div
-            className={`header-toast toast-${dockToast.variant}${dockToast.closing ? ' header-toast-closing' : ''}`}
-            role={dockToast.variant === 'warning' || dockToast.variant === 'danger' ? 'alert' : 'status'}
-          >
-            <div className="header-toast-row">
-              {dockToast.avatarUrl ? (
-                <img src={dockToast.avatarUrl} alt="" className="header-toast-avatar" referrerPolicy="no-referrer" />
-              ) : (
-                <span className={`header-toast-icon toast-icon-${dockToast.variant}`} aria-hidden="true">
-                  <ToastVariantIcon variant={dockToast.variant} />
-                </span>
-              )}
-              <span
-                className="header-toast-text"
-                title={[dockToast.title, dockToast.message].filter(Boolean).join(' · ')}
-              >
-                {dockToast.title && <strong>{dockToast.title}</strong>}
-                {dockToast.title && dockToast.message && <span className="header-toast-text-sep"> &middot; </span>}
-                {dockToast.message && <span className="header-toast-message">{dockToast.message}</span>}
-              </span>
-              <div className="header-toast-controls">
-                {dockToast.actionLabel && (
-                  <button
-                    type="button"
-                    className="toast-action"
-                    onClick={() => {
-                      dockToast.onAction?.()
-                      startClose(dockToast.id)
-                    }}
-                  >
-                    {dockToast.actionLabel}
-                  </button>
-                )}
-                <button type="button" className="toast-close" onClick={() => startClose(dockToast.id)} aria-label="Dismiss">
-                  ×
-                </button>
-              </div>
-            </div>
-            <ToastProgressBar
-              id={dockToast.id}
-              variant={dockToast.variant}
-              duration={dockToast.duration}
-              onComplete={() => startClose(dockToast.id)}
-            />
-          </div>,
-          headerSlotEl
-        )}
+      {dockToast && headerSlotEl && createPortal(<ToastPill toast={dockToast} onClose={startClose} />, headerSlotEl)}
 
       {createPortal(
         <div className="toast-stack no-print">
           {stackToasts.map((t) => (
-            <div
-              key={t.id}
-              className={`toast toast-${t.variant}${t.closing ? ' toast-closing' : ''}`}
-              role={t.variant === 'warning' || t.variant === 'danger' ? 'alert' : 'status'}
-            >
-              <div className="toast-row">
-                {t.avatarUrl ? (
-                  <img src={t.avatarUrl} alt="" className="toast-avatar" referrerPolicy="no-referrer" />
-                ) : (
-                  <span className={`toast-icon toast-icon-${t.variant}`} aria-hidden="true">
-                    <ToastVariantIcon variant={t.variant} />
-                  </span>
-                )}
-                <div className="toast-text">
-                  {t.title && <div className="toast-title">{t.title}</div>}
-                  {t.message && <div className="toast-message">{t.message}</div>}
-                </div>
-                <div className="toast-controls">
-                  {t.actionLabel && (
-                    <button
-                      type="button"
-                      className="toast-action"
-                      onClick={() => {
-                        t.onAction?.()
-                        startClose(t.id)
-                      }}
-                    >
-                      {t.actionLabel}
-                    </button>
-                  )}
-                  <button type="button" className="toast-close" onClick={() => startClose(t.id)} aria-label="Dismiss">
-                    ×
-                  </button>
-                </div>
-              </div>
-              <ToastProgressBar id={t.id} variant={t.variant} duration={t.duration} onComplete={() => startClose(t.id)} />
-            </div>
+            <ToastPill key={t.id} toast={t} onClose={startClose} />
           ))}
         </div>,
         getFullscreenPortalRoot()
