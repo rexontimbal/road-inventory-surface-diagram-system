@@ -14,8 +14,9 @@ async function handleResponse(res) {
   return res.json()
 }
 
-export async function exportBackup() {
-  const res = await fetch(`${BASE}/export`)
+export async function exportBackup(district) {
+  const url = district ? `${BASE}/export?district=${encodeURIComponent(district)}` : `${BASE}/export`
+  const res = await fetch(url)
   return handleResponse(res)
 }
 

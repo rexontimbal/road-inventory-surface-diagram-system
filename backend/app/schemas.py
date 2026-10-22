@@ -428,10 +428,22 @@ class BackupCounts(BaseModel):
     logs: int
 
 
+class BackupDistrict(BaseModel):
+    deo: str
+    ld: str | None = None
+
+
 class BackupExport(BaseModel):
     app_name: str = APP_NAME
     backup_version: int = BACKUP_VERSION
     exported_at: str
+    # "all" (whole active workspace) or "district" (one DEO only) -- set by
+    # GET /api/backup/export's optional ?district= param. Carried through
+    # restore preview/commit so a district backup's "Replace this District"
+    # mode knows which district to scope its delete to, without re-deriving
+    # it from the (freeform) roads list.
+    scope: Literal["all", "district"] = "all"
+    district: BackupDistrict | None = None
     counts: BackupCounts
     roads: list[BackupRoad]
     upload_log: list[UploadLogOut] = []

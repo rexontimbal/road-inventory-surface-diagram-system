@@ -178,7 +178,7 @@ export default function DeleteAllDataModal({ onCancel, onConfirm, deleting }) {
                 checked={downloadBackupFirst}
                 onChange={(e) => setDownloadBackupFirst(e.target.checked)}
               />
-              Download a backup first
+              {scope === 'district' ? 'Download a backup of this District first' : 'Download a backup first'}
             </label>
 
             <div className="delete-all-confirm-row">

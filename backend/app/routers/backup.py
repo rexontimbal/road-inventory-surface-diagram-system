@@ -11,6 +11,7 @@ from app.schemas import (
     APP_NAME,
     BACKUP_VERSION,
     BackupCounts,
+    BackupDistrict,
     BackupExport,
     BackupRoad,
     BackupSegment,
@@ -42,10 +43,19 @@ def _prune_pending_restores():
 
 
 @router.get("/export", response_model=BackupExport)
-def export_backup(db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
-    roads = apply_scope(db.query(Road), Road, scope).order_by(Road.section_id).all()
+def export_backup(district: str | None = None, db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
+    """Exports the active workspace -- or, with ?district=<DEO>, just that
+    one District's sections/segments. Upload History is only ever included
+    for a whole-workspace export: log entries aren't attributable to a
+    single District, so a District backup carries none (counts.logs=0)
+    rather than either the whole log or a misleadingly filtered slice."""
+    query = apply_scope(db.query(Road), Road, scope)
+    if district:
+        query = query.filter(Road.deo == district)
+    roads = query.order_by(Road.section_id).all()
     if not roads:
-        raise HTTPException(status_code=400, detail="There's no data to back up yet.")
+        detail = f"There's no data in {district} yet." if district else "There's no data to back up yet."
+        raise HTTPException(status_code=400, detail=detail)
     backup_roads: list[BackupRoad] = []
     total_segments = 0
     for road in roads:
@@ -82,15 +92,22 @@ def export_backup(db: Session = Depends(get_db), scope: Scope = Depends(get_scop
             )
         )
 
-    log_entries = (
-        apply_scope(db.query(UploadLogEntry), UploadLogEntry, scope).order_by(UploadLogEntry.timestamp.desc()).all()
-    )
-    log_out = [entry_to_out(e) for e in log_entries]
+    if district:
+        log_out = []
+    else:
+        log_entries = (
+            apply_scope(db.query(UploadLogEntry), UploadLogEntry, scope)
+            .order_by(UploadLogEntry.timestamp.desc())
+            .all()
+        )
+        log_out = [entry_to_out(e) for e in log_entries]
 
     return BackupExport(
         app_name=APP_NAME,
         backup_version=BACKUP_VERSION,
         exported_at=datetime.now(timezone.utc).isoformat(),
+        scope="district" if district else "all",
+        district=BackupDistrict(deo=district, ld=roads[0].ld) if district else None,
         counts=BackupCounts(roads=len(backup_roads), segments=total_segments, logs=len(log_out)),
         roads=backup_roads,
         upload_log=log_out,
@@ -181,12 +198,26 @@ def restore_commit(body: RestoreCommitIn, db: Session = Depends(get_db), scope: 
     pre_existing_keys = set(existing_roads.keys())
 
     if body.mode == "replace_all":
-        # Scoped deletes -- a guest's "Replace all data" must only ever wipe
-        # their own sandbox, and a signed-in user's must only wipe the
-        # shared workspace. An unscoped .delete() here would nuke every
-        # scope's data at once.
-        apply_scope(db.query(RoadSegment), RoadSegment, scope).delete()
-        apply_scope(db.query(Road), Road, scope).delete()
+        if backup.scope == "district" and backup.district:
+            # A District backup's "Replace this District" must only ever wipe
+            # that one District's sections -- never the rest of the active
+            # workspace. RoadSegment has no deo column of its own, so its
+            # rows are targeted by section_id (collected from the matching
+            # Road rows) rather than filtered directly.
+            district_query = apply_scope(db.query(Road), Road, scope).filter(Road.deo == backup.district.deo)
+            district_section_ids = [r.section_id for r in district_query.all()]
+            if district_section_ids:
+                apply_scope(db.query(RoadSegment), RoadSegment, scope).filter(
+                    RoadSegment.section_id.in_(district_section_ids)
+                ).delete(synchronize_session=False)
+                district_query.delete(synchronize_session=False)
+        else:
+            # Scoped deletes -- a guest's "Replace all data" must only ever wipe
+            # their own sandbox, and a signed-in user's must only wipe the
+            # shared workspace. An unscoped .delete() here would nuke every
+            # scope's data at once.
+            apply_scope(db.query(RoadSegment), RoadSegment, scope).delete()
+            apply_scope(db.query(Road), Road, scope).delete()
 
     added = replaced = kept = 0
     log_details: list[dict] = []

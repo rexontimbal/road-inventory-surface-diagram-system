@@ -10,6 +10,21 @@ import DeleteAllDataModal from './DeleteAllDataModal'
 
 const REQUIRED_COLUMNS_AUTO_HIDE_MS = 10000
 
+// "Agusan del Norte District Engineering Office" -> "Agusan del Norte DEO" --
+// shared by the district-backup toast and (further sanitized below) its
+// filename, so both read the same shortened office name.
+function shortenDeoLabel(deo) {
+  return deo.replace(/\s*District Engineering Office\s*$/i, ' DEO').trim()
+}
+
+// -> "Agusan-del-Norte-DEO", safe to drop straight into a downloaded
+// filename (spaces to hyphens, anything else risky stripped).
+function districtFilenameSlug(deo) {
+  return shortenDeoLabel(deo)
+    .replace(/\s+/g, '-')
+    .replace(/[^a-zA-Z0-9-]/g, '')
+}
+
 const REQUIRED_COLUMNS = [
   'Section ID',
   'Classification',
@@ -188,12 +203,19 @@ const UploadPanel = forwardRef(function UploadPanel(
   // ("Backup saved..."), but the delete flow folds the outcome into its
   // own single combined toast instead of stacking two, so the actual
   // download+file-naming logic lives here with no toast of its own.
-  async function downloadBackupFile() {
-    const backup = await exportBackup()
+  //
+  // `district` (a DEO value, same as Delete All Data's scope selector) is
+  // only ever passed from that flow -- the standalone button never scopes
+  // its export, so it always gets the whole-workspace backup.
+  async function downloadBackupFile(district) {
+    const backup = await exportBackup(district)
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
     const now = new Date()
     const pad = (n) => String(n).padStart(2, '0')
-    const filename = `road-inventory-backup_${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.json`
+    const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}`
+    const districtPart =
+      backup.scope === 'district' && backup.district ? `_${districtFilenameSlug(backup.district.deo)}` : ''
+    const filename = `road-inventory-backup${districtPart}_${stamp}.json`
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -221,9 +243,13 @@ const UploadPanel = forwardRef(function UploadPanel(
   async function handleConfirmDeleteAll({ district, downloadBackupFirst }) {
     setDeletingAll(true)
     try {
+      // Scoped to `district` when one is selected -- the backup downloaded
+      // here must contain only the District about to be deleted, not the
+      // whole workspace (see downloadBackupFile's district param).
+      let backup = null
       if (downloadBackupFirst) {
         try {
-          await downloadBackupFile()
+          backup = await downloadBackupFile(district || undefined)
         } catch (err) {
           showToast({ variant: 'danger', message: `Backup failed, nothing was deleted: ${err.message}` })
           return
@@ -233,7 +259,11 @@ const UploadPanel = forwardRef(function UploadPanel(
       setDeleteAllModalOpen(false)
       await onDeletedAll?.()
       const count = result.deleted_sections
-      const backupSuffix = downloadBackupFirst ? ' Backup downloaded.' : ''
+      let backupSuffix = ''
+      if (backup) {
+        const scopeLabel = backup.scope === 'district' && backup.district ? ` ${shortenDeoLabel(backup.district.deo)} ·` : ''
+        backupSuffix = ` Backup saved ·${scopeLabel} ${backup.counts.roads.toLocaleString()} section${backup.counts.roads !== 1 ? 's' : ''} · ${backup.counts.segments.toLocaleString()} segments.`
+      }
       const message = district
         ? `${count} section${count !== 1 ? 's' : ''} deleted from ${district}.${backupSuffix}`
         : `All road data deleted (${count} section${count !== 1 ? 's' : ''}).${backupSuffix}`

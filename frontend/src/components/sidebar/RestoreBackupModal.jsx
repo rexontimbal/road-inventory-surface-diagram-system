@@ -13,6 +13,12 @@ function n(count) {
   return count.toLocaleString()
 }
 
+// "Agusan del Norte District Engineering Office" -> "Agusan del Norte DEO",
+// same shortening UploadPanel's district-backup toast/filename use.
+function shortenDeoLabel(deo) {
+  return deo.replace(/\s*District Engineering Office\s*$/i, ' DEO').trim()
+}
+
 // backup.roads carries each section's own total_length_m -- the preview
 // response itself only has counts (roads/segments/logs), so the km figure
 // shown in this modal is derived client-side from the full parsed backup
@@ -72,6 +78,8 @@ export default function RestoreBackupModal({ preview, backup, onCancel, onContin
 
   const showDuplicates = !isEmptyWorkspace && mode === 'merge' && preview.duplicates.length > 0
   const km = backupTotalKm(backup)
+  const isDistrict = backup?.scope === 'district' && !!backup?.district
+  const districtLabel = isDistrict ? shortenDeoLabel(backup.district.deo) : null
 
   if (zIndex == null) return null
 
@@ -111,8 +119,12 @@ export default function RestoreBackupModal({ preview, backup, onCancel, onContin
             </h3>
           </div>
           <p className="modal-message">
-            Backup from {formatDateTime(preview.backup_exported_at)} · {n(sections)} section{sections !== 1 ? 's' : ''} ·{' '}
-            {n(segments)} segment{segments !== 1 ? 's' : ''}
+            {isDistrict ? (
+              <>District backup: {districtLabel} ·{' '}</>
+            ) : (
+              <>Backup from {formatDateTime(preview.backup_exported_at)} · </>
+            )}
+            {n(sections)} section{sections !== 1 ? 's' : ''} · {n(segments)} segment{segments !== 1 ? 's' : ''}
             {km != null ? ` · ${km} km` : ''}. Your workspace is currently empty.
           </p>
           <div className="modal-actions">
@@ -162,7 +174,12 @@ export default function RestoreBackupModal({ preview, backup, onCancel, onContin
           </h3>
         </div>
         <p className="modal-message">
-          Backup from {formatDateTime(preview.backup_exported_at)} · {n(preview.backup_counts.roads)} section
+          {isDistrict ? (
+            <>District backup: {districtLabel} ·{' '}</>
+          ) : (
+            <>Backup from {formatDateTime(preview.backup_exported_at)} · </>
+          )}
+          {n(preview.backup_counts.roads)} section
           {preview.backup_counts.roads !== 1 ? 's' : ''} · {n(preview.backup_counts.segments)} segments
           {km != null ? ` · ${km} km` : ''}. Currently in the workspace: {n(preview.current_counts.roads)} section
           {preview.current_counts.roads !== 1 ? 's' : ''} · {n(preview.current_counts.segments)} segments.
@@ -182,8 +199,12 @@ export default function RestoreBackupModal({ preview, backup, onCancel, onContin
             className={`restore-mode-card restore-mode-card-danger${mode === 'replace_all' ? ' restore-mode-card-active' : ''}`}
             onClick={() => setMode('replace_all')}
           >
-            <strong>Replace all data</strong>
-            <span>Current data is fully replaced by the backup. Cannot be undone.</span>
+            <strong>{isDistrict ? 'Replace this District' : 'Replace all data'}</strong>
+            <span>
+              {isDistrict
+                ? "This District's data is fully replaced by the backup. Other Districts are untouched. Cannot be undone."
+                : 'Current data is fully replaced by the backup. Cannot be undone.'}
+            </span>
           </button>
         </div>
 
@@ -261,7 +282,7 @@ export default function RestoreBackupModal({ preview, backup, onCancel, onContin
             className={`modal-btn ${mode === 'replace_all' ? 'modal-btn-danger' : 'modal-btn-confirm'}`}
             onClick={() => onContinue(mode, decisions)}
           >
-            {mode === 'replace_all' ? 'Replace all data' : 'Continue'}
+            {mode === 'replace_all' ? (isDistrict ? 'Replace this District' : 'Replace all data') : 'Continue'}
           </button>
         </div>
       </div>
