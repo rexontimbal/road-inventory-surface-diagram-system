@@ -1,8 +1,8 @@
 import csv
 import io
+import logging
 import time
 from datetime import datetime, timezone
-from uuid import uuid4
 
 import openpyxl
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
@@ -10,9 +10,10 @@ from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
+from app import pending_ops
 from app.db import get_db
 from app.chainage import summarize_warnings
-from app.excel_import import ImportResult, TemplateError, parse_upload
+from app.excel_import import ImportResult, TemplateError, import_result_from_dict, import_result_to_dict, parse_upload
 from app.models import SHOULDER_TYPES, SURFACE_TYPES, Road, RoadSegment, UploadLogEntry  # noqa: F401 -- UploadLogEntry import registers the table for create_all
 from app.scope import Scope, apply_scope, get_scope, owner_kwargs, require_editor, require_owner, user_kwargs
 from app.schemas import (
@@ -50,21 +51,15 @@ from app.upload_log import compare_segments, export_log_csv, list_log_users, que
 
 router = APIRouter(prefix="/api/roads", tags=["roads"])
 
-# In-process cache bridging preview -> commit: the parsed plan (which can
-# include thousands of segment rows) is kept server-side so the client only
-# ever has to send/receive the small per-road summaries, not the full parsed
-# file twice. Single-office tool, single process -- an in-memory dict is
-# enough; no need for a shared cache/session store. Entries expire so an
-# abandoned preview (closed tab, never confirmed) doesn't leak memory.
-_PENDING_UPLOADS: dict[str, tuple[ImportResult, str, int, float]] = {}
-_PENDING_TTL_SECONDS = 15 * 60
+_logger = logging.getLogger("app")
 
-
-def _prune_pending_uploads():
-    now = time.time()
-    expired = [token for token, (_, _, _, expires_at) in _PENDING_UPLOADS.items() if expires_at < now]
-    for token in expired:
-        _PENDING_UPLOADS.pop(token, None)
+# Bridges preview -> commit via the DB-backed app/pending_ops.py (a
+# `pending_operations` row, not an in-process dict) -- see that module's
+# docstring for why: a Render free-tier sleep/restart between preview and
+# commit, or a commit request landing twice (double-click, confused retry)
+# while the first is still running, both need to survive without the user
+# seeing a misleading "session expired" error.
+PENDING_KIND = "upload"
 
 
 def _derive_status(surface_type: str) -> str:
@@ -225,9 +220,13 @@ async def upload_preview(file: UploadFile, db: Session = Depends(get_db), scope:
         db.commit()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    _prune_pending_uploads()
-    token = str(uuid4())
-    _PENDING_UPLOADS[token] = (result, file.filename, len(contents), time.time() + _PENDING_TTL_SECONDS)
+    pending_ops.prune_expired(db)
+    token = pending_ops.create_pending(
+        db,
+        PENDING_KIND,
+        scope,
+        {"import_result": import_result_to_dict(result), "source_file": file.filename, "file_size": len(contents)},
+    )
 
     existing_by_key = {
         road.section_id.strip().lower(): road for road in apply_scope(db.query(Road), Road, scope).all()
@@ -273,28 +272,21 @@ async def upload_preview(file: UploadFile, db: Session = Depends(get_db), scope:
     )
 
 
-@router.post("/upload/commit", response_model=UploadResult)
-def upload_commit(body: UploadCommitIn, db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
-    """Applies a previously-previewed upload. `decisions` only needs entries
-    for section IDs that were flagged as duplicates in the preview -- any
-    accepted road with no decision (i.e. it was new, no conflict) is always
-    added. 'keep' leaves the existing road completely untouched; 'replace'
-    deletes its old segments and inserts the new ones (no mixing).
+def _run_upload_commit(
+    result: ImportResult, source_file: str, file_size: int, decisions: dict, db: Session, scope: Scope
+) -> UploadResult:
+    """The actual write side of an upload commit -- pulled out of the route
+    function so `upload_commit` can wrap exactly this (and only this) in the
+    claim/timing/error-marking machinery below. `decisions` only needs
+    entries for section IDs that were flagged as duplicates in the preview
+    -- any accepted road with no decision (i.e. it was new, no conflict) is
+    always added. 'keep' leaves the existing road completely untouched;
+    'replace' deletes its old segments and inserts the new ones (no mixing).
 
     Segment rows are bulk-inserted in one transaction (bulk_insert_mappings,
     not one ORM object + db.add() per row) -- a real DPWH file runs to
     ~11,200 rows, and per-row ORM object construction/flush tracking is the
     bottleneck at that volume."""
-    require_editor(scope)
-    _prune_pending_uploads()
-    entry = _PENDING_UPLOADS.pop(body.token, None)
-    if entry is None:
-        raise HTTPException(
-            status_code=400,
-            detail="This upload session has expired or was already applied. Please re-upload the file.",
-        )
-    result, source_file, file_size, _ = entry
-
     existing_by_key = {
         road.section_id.strip().lower(): road for road in apply_scope(db.query(Road), Road, scope).all()
     }
@@ -309,7 +301,7 @@ def upload_commit(body: UploadCommitIn, db: Session = Depends(get_db), scope: Sc
 
     for plan in result.accepted:
         existing = existing_by_key.get(plan.section_id.strip().lower())
-        action = body.decisions.get(plan.section_id, "replace")
+        action = decisions.get(plan.section_id, "replace")
 
         if existing is not None and action == "keep":
             skipped.append(RoadSkippedOut(section_id=plan.section_id, road_name=plan.road_name))
@@ -446,14 +438,78 @@ def upload_commit(body: UploadCommitIn, db: Session = Depends(get_db), scope: Sc
     )
 
 
+@router.post("/upload/commit", response_model=UploadResult)
+def upload_commit(body: UploadCommitIn, db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
+    require_editor(scope)
+    pending_ops.prune_expired(db)
+
+    outcome = pending_ops.claim(db, body.token, PENDING_KIND)
+    if outcome.status == "not_found":
+        raise HTTPException(
+            status_code=400,
+            detail="This upload session has expired or was already applied. Please re-upload the file.",
+        )
+    if outcome.status == "done":
+        return UploadResult(**outcome.result)
+    if outcome.status == "error":
+        _logger.error("upload commit replay of a failed token=%s: %s", body.token, outcome.error_detail)
+        raise HTTPException(status_code=400, detail="Upload failed. Please re-upload the file and try again.")
+    if outcome.status == "wait":
+        # Another request (an earlier click of Continue, most likely)
+        # already claimed this token and is running right now -- wait for
+        # IT to finish and replay its result, instead of telling this
+        # caller their session "expired" while the real upload is still
+        # quietly succeeding in the background.
+        outcome = pending_ops.wait_for_result(body.token)
+        if outcome.status == "done":
+            return UploadResult(**outcome.result)
+        if outcome.status == "error":
+            _logger.error("upload commit replay of a failed token=%s: %s", body.token, outcome.error_detail)
+            raise HTTPException(status_code=400, detail="Upload failed. Please re-upload the file and try again.")
+        raise HTTPException(
+            status_code=409, detail="This upload is still in progress. Please wait a moment and try again."
+        )
+
+    # outcome.status == "claimed" -- this request now owns the token.
+    result = import_result_from_dict(outcome.payload["import_result"])
+    source_file = outcome.payload["source_file"]
+    file_size = outcome.payload["file_size"]
+    t0 = time.perf_counter()
+    try:
+        upload_result = _run_upload_commit(result, source_file, file_size, body.decisions, db, scope)
+    except Exception as exc:
+        db.rollback()
+        pending_ops.mark_error(db, body.token, str(exc))
+        raise
+    duration_s = time.perf_counter() - t0
+    total_segments = sum(len(p.segments) for p in result.accepted)
+    _logger.info(
+        "upload commit completed: token=%s roads=%d segments=%d duration=%.2fs",
+        body.token,
+        len(result.accepted),
+        total_segments,
+        duration_s,
+    )
+    pending_ops.mark_done(db, body.token, upload_result.model_dump())
+    return upload_result
+
+
 @router.post("/upload/cancel")
 def upload_cancel(body: UploadCancelIn, db: Session = Depends(get_db), scope: Scope = Depends(get_scope)):
     """Logs a cancelled upload (whatever the preview found, nothing applied)
     and discards the pending token. Safe to call even if the token already
     expired -- still logs a minimal cancelled entry."""
     require_editor(scope)
-    _prune_pending_uploads()
-    entry = _PENDING_UPLOADS.pop(body.token, None)
+    payload = pending_ops.get_payload(db, body.token, PENDING_KIND)
+    pending_ops.discard(db, body.token)
+    entry = None
+    if payload is not None:
+        entry = (
+            import_result_from_dict(payload["import_result"]),
+            payload["source_file"],
+            payload["file_size"],
+            None,
+        )
 
     log_details: list[dict] = []
     file_name = None
@@ -970,6 +1026,7 @@ def delete_all_roads(district: str | None = None, db: Session = Depends(get_db),
     touched -- only one new entry is added to it, same as every other
     write in this router."""
     require_owner(scope)
+    t0 = time.perf_counter()
     query = apply_scope(db.query(Road), Road, scope)
     if district:
         query = query.filter(Road.deo == district)
@@ -997,6 +1054,13 @@ def delete_all_roads(district: str | None = None, db: Session = Depends(get_db),
         **user_kwargs(scope),
     )
     db.commit()
+    _logger.info(
+        "delete-all completed: scope=%s sections=%d segments=%d duration=%.2fs",
+        label,
+        section_count,
+        segment_count,
+        time.perf_counter() - t0,
+    )
     return DeleteAllResult(deleted_sections=section_count, deleted_segments=segment_count, total_length_m=total_length_m)
 
 

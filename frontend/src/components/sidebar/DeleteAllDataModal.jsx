@@ -52,7 +52,7 @@ export default function DeleteAllDataModal({ onCancel, onConfirm, deleting }) {
     const prevOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     function handleKeyDown(e) {
-      if (!isTop()) return
+      if (!isTop() || deleting) return
       if (e.key === 'Escape') {
         e.preventDefault()
         onCancel()
@@ -64,7 +64,7 @@ export default function DeleteAllDataModal({ onCancel, onConfirm, deleting }) {
       document.body.style.overflow = prevOverflow
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [deleting])
 
   if (zIndex == null) return null
 
@@ -81,6 +81,7 @@ export default function DeleteAllDataModal({ onCancel, onConfirm, deleting }) {
       className="modal-backdrop no-print"
       style={{ zIndex }}
       onMouseDown={(e) => {
+        if (deleting) return
         if (e.target === e.currentTarget) onCancel()
       }}
     >
@@ -119,84 +120,94 @@ export default function DeleteAllDataModal({ onCancel, onConfirm, deleting }) {
                 : formatStat(preview.total_sections, preview.total_segments, preview.total_length_m)}
             </p>
 
-            <div className="delete-all-scope-options" role="radiogroup" aria-label="What to delete">
-              <label className="delete-all-scope-option">
-                <input
-                  type="radio"
-                  name="delete-all-scope"
-                  checked={scope === 'all'}
-                  onChange={() => setScope('all')}
-                />
-                All data
-              </label>
-              <label className="delete-all-scope-option">
-                <input
-                  type="radio"
-                  name="delete-all-scope"
-                  checked={scope === 'district'}
-                  onChange={() => setScope('district')}
-                  disabled={preview.districts.length === 0}
-                />
-                Only one District
-              </label>
-            </div>
+            <fieldset className="restore-modal-fieldset" disabled={deleting}>
+              <div className="delete-all-scope-options" role="radiogroup" aria-label="What to delete">
+                <label className="delete-all-scope-option">
+                  <input
+                    type="radio"
+                    name="delete-all-scope"
+                    checked={scope === 'all'}
+                    onChange={() => setScope('all')}
+                  />
+                  All data
+                </label>
+                <label className="delete-all-scope-option">
+                  <input
+                    type="radio"
+                    name="delete-all-scope"
+                    checked={scope === 'district'}
+                    onChange={() => setScope('district')}
+                    disabled={preview.districts.length === 0}
+                  />
+                  Only one District
+                </label>
+              </div>
 
-            {scope === 'district' && (
-              <CustomSelect
-                size="md"
-                value={district}
-                onChange={setDistrict}
-                ariaLabel="District to delete"
-                triggerClassName="delete-all-district-trigger"
-                // The trigger only ever shows the plain district name (full
-                // name truncates with an ellipsis if it's long, with the
-                // untruncated name in a native tooltip -- CustomSelect
-                // already sets title={selected.label}); counts live in the
-                // summary box above instead of being crammed in here too.
-                options={preview.districts.map((d) => ({
-                  value: d.deo,
-                  label: d.deo,
-                  stat: formatStat(d.sections, d.segments, d.total_length_m),
-                }))}
-                getSearchText={(o) => `${o.label} ${o.stat}`}
-                // Wider than the 280px default -- a district name plus its
-                // stat line needs more room to stay readable, clamped to
-                // the viewport regardless (see CustomSelect's own panelWidth).
-                panelWidth={380}
-                renderOption={(o) => (
-                  <div className="delete-all-district-option">
-                    <span className="delete-all-district-option-name">{o.label}</span>
-                    <span className="delete-all-district-option-stat">{o.stat}</span>
-                  </div>
-                )}
-              />
+              {scope === 'district' && (
+                <CustomSelect
+                  size="md"
+                  value={district}
+                  onChange={setDistrict}
+                  disabled={deleting}
+                  ariaLabel="District to delete"
+                  triggerClassName="delete-all-district-trigger"
+                  // The trigger only ever shows the plain district name (full
+                  // name truncates with an ellipsis if it's long, with the
+                  // untruncated name in a native tooltip -- CustomSelect
+                  // already sets title={selected.label}); counts live in the
+                  // summary box above instead of being crammed in here too.
+                  options={preview.districts.map((d) => ({
+                    value: d.deo,
+                    label: d.deo,
+                    stat: formatStat(d.sections, d.segments, d.total_length_m),
+                  }))}
+                  getSearchText={(o) => `${o.label} ${o.stat}`}
+                  // Wider than the 280px default -- a district name plus its
+                  // stat line needs more room to stay readable, clamped to
+                  // the viewport regardless (see CustomSelect's own panelWidth).
+                  panelWidth={380}
+                  renderOption={(o) => (
+                    <div className="delete-all-district-option">
+                      <span className="delete-all-district-option-name">{o.label}</span>
+                      <span className="delete-all-district-option-stat">{o.stat}</span>
+                    </div>
+                  )}
+                />
+              )}
+
+              <label className="delete-all-checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={downloadBackupFirst}
+                  onChange={(e) => setDownloadBackupFirst(e.target.checked)}
+                />
+                {scope === 'district' ? 'Download a backup of this District first' : 'Download a backup first'}
+              </label>
+
+              <div className="delete-all-confirm-row">
+                <label htmlFor="delete-all-confirm-input" className="delete-all-confirm-label">
+                  Type <strong>{CONFIRM_WORD}</strong> to confirm
+                </label>
+                <input
+                  id="delete-all-confirm-input"
+                  type="text"
+                  className="delete-all-confirm-input"
+                  value={confirmText}
+                  onChange={(e) => setConfirmText(e.target.value)}
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  placeholder={CONFIRM_WORD}
+                />
+              </div>
+            </fieldset>
+
+            {deleting && (
+              <p className="restore-progress-row">
+                <span className="spinner spinner-dark" aria-hidden="true" />
+                Deleting… this can take a moment on the online server.
+              </p>
             )}
-
-            <label className="delete-all-checkbox-row">
-              <input
-                type="checkbox"
-                checked={downloadBackupFirst}
-                onChange={(e) => setDownloadBackupFirst(e.target.checked)}
-              />
-              {scope === 'district' ? 'Download a backup of this District first' : 'Download a backup first'}
-            </label>
-
-            <div className="delete-all-confirm-row">
-              <label htmlFor="delete-all-confirm-input" className="delete-all-confirm-label">
-                Type <strong>{CONFIRM_WORD}</strong> to confirm
-              </label>
-              <input
-                id="delete-all-confirm-input"
-                type="text"
-                className="delete-all-confirm-input"
-                value={confirmText}
-                onChange={(e) => setConfirmText(e.target.value)}
-                autoComplete="off"
-                autoCapitalize="off"
-                spellCheck={false}
-                placeholder={CONFIRM_WORD}
-              />
-            </div>
           </>
         )}
 

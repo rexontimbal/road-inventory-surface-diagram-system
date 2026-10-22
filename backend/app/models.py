@@ -158,6 +158,45 @@ class UploadLogEntry(Base):
     actor_avatar_url = Column(String, nullable=True)
 
 
+class PendingOperation(Base):
+    """Server-side state for a two-step preview -> commit flow (restore from
+    backup, Excel upload) -- the token a preview hands back to the client,
+    and everything needed to actually perform the commit it was previewing.
+
+    Deliberately a DB table, not an in-process dict: on Render's free tier
+    the app can sleep/restart between a user previewing and clicking
+    Confirm, and a commit landing while a PREVIOUS commit of the SAME token
+    is still running (a double-click, or the user retrying after a
+    confusing "expired" error) must never silently start a second,
+    duplicate write. See app/pending_ops.py for the claim/replay logic
+    built on top of this table -- the `status` transition pending ->
+    running -> done is itself the concurrency guard (an atomic
+    UPDATE ... WHERE status='pending', enforced by the database's own row
+    locking, not by anything held in this process's memory), and `result_json`
+    lets a second request for an already-done token replay the exact same
+    success instead of erroring.
+
+    payload_json/result_json are plain Text, same convention as
+    UploadLogEntry.details_json above -- hand-serialized JSON, not
+    SQLAlchemy's JSON column type (unused elsewhere in this codebase)."""
+
+    __tablename__ = "pending_operations"
+
+    token = Column(String, primary_key=True)
+    kind = Column(String, nullable=False)  # "restore" | "upload"
+    owner_type = Column(String, nullable=False)
+    owner_id = Column(String, nullable=False)
+    payload_json = Column(Text, nullable=False)
+    status = Column(String, nullable=False, default="pending")  # pending | running | done | error
+    result_json = Column(Text, nullable=True)
+    error_detail = Column(Text, nullable=True)
+    created_at = Column(String, nullable=False)
+    expires_at = Column(String, nullable=False)
+    completed_at = Column(String, nullable=True)
+
+    __table_args__ = (Index("idx_pending_operations_expires", "expires_at"),)
+
+
 class User(Base):
     """A signed-in Google account."""
 

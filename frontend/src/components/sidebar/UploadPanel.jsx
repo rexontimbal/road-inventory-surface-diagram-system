@@ -110,6 +110,12 @@ const UploadPanel = forwardRef(function UploadPanel(
   const [deleteAllModalOpen, setDeleteAllModalOpen] = useState(false)
   const [deletingAll, setDeletingAll] = useState(false)
   const [pendingRestore, setPendingRestore] = useState(null)
+  // True for the whole span of a restore commit -- RestoreBackupModal
+  // disables every control and blocks Escape/backdrop-close while this is
+  // true, so a restore of several thousand rows (slow enough over the live
+  // Postgres/Neon deployment to invite an impatient second click) can never
+  // have two commit requests in flight for the same token.
+  const [restoring, setRestoring] = useState(false)
   const persistRequestedRef = useRef(false)
   // Set only when the preview finds Road-ID conflicts -- holds the preview
   // response + file name until the user resolves the modal (or cancels).
@@ -241,6 +247,7 @@ const UploadPanel = forwardRef(function UploadPanel(
   }
 
   async function handleConfirmDeleteAll({ district, downloadBackupFirst }) {
+    if (deletingAll) return // already in flight -- DeleteAllDataModal's own disabled state should prevent this anyway
     setDeletingAll(true)
     try {
       // Scoped to `district` when one is selected -- the backup downloaded
@@ -303,6 +310,8 @@ const UploadPanel = forwardRef(function UploadPanel(
   }
 
   async function handleRestoreContinue(mode, decisions) {
+    if (restoring) return // already in flight -- RestoreBackupModal's own disabled state should prevent this anyway
+    setRestoring(true)
     try {
       const res = await commitRestore(pendingRestore.preview.token, mode, decisions)
       setPendingRestore(null)
@@ -314,7 +323,12 @@ const UploadPanel = forwardRef(function UploadPanel(
         message: `Backup restored · ${total.toLocaleString()} section${total !== 1 ? 's' : ''}`,
       })
     } catch (err) {
+      // pendingRestore is deliberately left set on failure -- the modal
+      // stays open (now re-enabled) so the user can just retry the same
+      // token, rather than having to re-select the backup file.
       showToast({ variant: 'danger', message: `Restore failed: ${err.message}` })
+    } finally {
+      setRestoring(false)
     }
   }
 
@@ -336,7 +350,7 @@ const UploadPanel = forwardRef(function UploadPanel(
 
   async function handleFileChange(e) {
     const file = e.target.files?.[0]
-    if (!file) return
+    if (!file || uploading) return
     setError('')
     setUploading(true)
     try {
@@ -399,6 +413,7 @@ const UploadPanel = forwardRef(function UploadPanel(
   }
 
   function handleConflictContinue(decisions) {
+    if (uploading) return // already in flight -- the conflict modal's own disabled state should prevent this anyway
     finishUpload(pendingConflict.preview.token, decisions, pendingConflict.fileName)
   }
 
@@ -594,6 +609,7 @@ const UploadPanel = forwardRef(function UploadPanel(
           duplicates={pendingConflict.preview.duplicates}
           newCount={pendingConflict.preview.new_roads.length}
           sourceFile={pendingConflict.fileName}
+          committing={uploading}
           onCancel={handleConflictCancel}
           onContinue={handleConflictContinue}
         />
@@ -616,6 +632,7 @@ const UploadPanel = forwardRef(function UploadPanel(
         <RestoreBackupModal
           preview={pendingRestore.preview}
           backup={pendingRestore.backup}
+          restoring={restoring}
           onCancel={handleRestoreCancel}
           onContinue={handleRestoreContinue}
         />

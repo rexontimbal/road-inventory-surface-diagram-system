@@ -1456,6 +1456,14 @@ button:focus-visible {
   height: 11px;
   border-width: 1.5px;
 }
+/* .spinner's own border/border-top-color assume a dark/colored background
+   (white spokes on a translucent-white track) -- this modifier swaps to
+   dark-on-light for use inside a white modal body (the Restoring…/
+   Uploading…/Deleting… progress rows below). */
+.spinner-dark {
+  border-color: rgba(15, 23, 42, 0.15);
+  border-top-color: var(--accent);
+}
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -3064,6 +3072,36 @@ tbody tr:hover .row-edit-btn,
 /* ===== Restore-from-backup modal ===== */
 .restore-modal-card {
   max-height: 85vh;
+}
+/* Shared "everything in here is disabled while a commit is running" wrapper
+   -- used by RestoreBackupModal, UploadConflictModal, and
+   DeleteAllDataModal's bodies. A plain <fieldset disabled> already stops
+   every descendant control from receiving input; this just strips the
+   browser's default fieldset chrome (border/margin/padding) so it's
+   invisible when NOT disabled, plus a faint dim while it is, as a visual
+   cue to match the cursor already going not-allowed. */
+.restore-modal-fieldset {
+  border: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.restore-modal-fieldset:disabled {
+  opacity: 0.6;
+}
+/* The "Restoring…/Uploading…/Deleting… this can take up to a minute on the
+   online server" progress row -- same position every one of those modals
+   puts it, directly above the footer buttons. */
+.restore-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  background: var(--surface-sunken);
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
 }
 .restore-mode-row {
   display: grid;

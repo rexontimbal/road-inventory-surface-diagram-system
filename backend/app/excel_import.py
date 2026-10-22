@@ -1,5 +1,5 @@
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from io import BytesIO
 
 import openpyxl
@@ -83,6 +83,40 @@ class ImportResult:
     rejected: list[SectionRejection]
     total_rows_processed: int
     ignored_columns: list[str]
+
+
+def import_result_to_dict(result: ImportResult) -> dict:
+    """Plain-dict form of a parsed upload, JSON-serializable as-is (every
+    field on every nested dataclass here is already a str/int/float/bool/
+    list) -- used to persist a pending upload's parsed payload in the
+    `pending_operations` table between preview and commit. See
+    import_result_from_dict for the reverse; `asdict` alone can't round-trip
+    back to the original dataclasses, only to this app's own reconstruction
+    below."""
+    return asdict(result)
+
+
+def import_result_from_dict(d: dict) -> ImportResult:
+    return ImportResult(
+        accepted=[
+            SectionImportPlan(
+                section_id=p["section_id"],
+                road_name=p["road_name"],
+                classification=p["classification"],
+                deo=p["deo"],
+                ld=p["ld"],
+                segments=[ParsedRow(**s) for s in p["segments"]],
+                warnings=[RowWarning(**w) for w in p["warnings"]],
+            )
+            for p in d["accepted"]
+        ],
+        rejected=[
+            SectionRejection(section_id=r["section_id"], errors=[RowError(**e) for e in r["errors"]])
+            for r in d["rejected"]
+        ],
+        total_rows_processed=d["total_rows_processed"],
+        ignored_columns=d["ignored_columns"],
+    )
 
 
 def parse_upload(file_bytes: bytes) -> ImportResult:
